@@ -539,6 +539,18 @@ const RESUME_GRACE  = 9000;
 // Hard floor: ignore peaks closer than this (prevents double-firing on one hit)
 const REFRACTORY    = 110;
 
+// Spectral gate — signature scoring weights and thresholds
+const SIG_WEIGHT_FLAT   = 0.45;  // spectral flatness weight
+const SIG_WEIGHT_CREST  = 0.30;  // crest factor weight
+const SIG_WEIGHT_CENT   = 0.25;  // spectral centroid weight
+const SIG_MIN_SCORE     = 0.30;  // minimum signature score to accept a peak as a jump
+const CREST_ROPE_MIN    = 3.0;   // rope snaps usually have crest factor > 3
+const CREST_NORM_MAX    = 12.0;  // normalize crest factor to [0,1] in this range
+const CENT_ROPE_MIN_HZ  = 1200;  // rope centroid usually > 1200 Hz
+const CENT_ROPE_MAX_HZ  = 10000; // upper range for normalization
+const FLAT_ROPE_MIN     = 0.15;  // rope flatness usually > 0.15 (broadband)
+const TEMPLATE_BLEND    = 0.35;  // how much to weight user template vs generic thresholds
+
 const HIST_MAX      = 48;
 const RIBBON_SCALE  = 1.6;   // visual gain on level bar
 
@@ -569,9 +581,20 @@ let timerHandle  = null;
 let history = [];   // { du: bool, sep: bool }
 
 // Audio
-let audioCtx = null, analyser = null, dataArray = null, stream = null;
+let audioCtx = null, analyser = null, dataArray = null, freqArray = null, stream = null;
 let rafHandle  = null;
 let isListening = false;
+
+// Spectral baseline (from calibration)
+let baselineFlatness = 0;
+let baselineCentroid = 0;
+
+// Spectral template (learned from user's rope)
+let ropeTemplate = { flatness: 0, crest: 0, centroid: 0, count: 0 };
+
+// Debug: last rejected/accepted info
+let lastSigScore = 0;
+let lastSigRejected = false;
 
 // ═══════════════════════════════════════════════════════════════
 //   DOM
@@ -623,6 +646,80 @@ function baseThreshold() {
   // sens 1 → multiplier ~6.2×  |  sens 10 → multiplier ~1×
   const mult = 1 + (10 - sensitivity) * 0.58;
   return Math.max(base * mult * 2.6, 0.016);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   SPECTRAL FEATURE FUNCTIONS
+// ═══════════════════════════════════════════════════════════════
+
+function computeSpectralFlatness(freq) {
+  // Geometric mean / arithmetic mean of power spectrum
+  // High → broadband (noise-like, rope snap) | Low → tonal (whistle, voice)
+  let logSum = 0, linSum = 0, n = 0;
+  const eps = 1e-10;
+  for (let i = 1; i < freq.length; i++) {  // skip DC bin
+    const v = freq[i] / 255 + eps;
+    logSum += Math.log(v);
+    linSum += v;
+    n++;
+  }
+  if (n === 0) return 0;
+  const geoMean = Math.exp(logSum / n);
+  const ariMean = linSum / n;
+  return ariMean > eps ? geoMean / ariMean : 0;
+}
+
+function computeCrestFactor(timeArr) {
+  // Peak / RMS — high = impulsive transient (rope), low = sustained (voice)
+  let peak = 0, sumSq = 0;
+  for (let i = 0; i < timeArr.length; i++) {
+    const v = Math.abs(timeArr[i] - 128) / 128;
+    if (v > peak) peak = v;
+    sumSq += v * v;
+  }
+  const rms = Math.sqrt(sumSq / timeArr.length);
+  return rms > 1e-8 ? peak / rms : 0;
+}
+
+function computeSpectralCentroid(freq, sampleRate, fftSize) {
+  // Weighted average frequency — rope snaps have mid-high centroid
+  let weightedSum = 0, totalEnergy = 0;
+  const binWidth = sampleRate / fftSize;
+  for (let i = 1; i < freq.length; i++) {
+    const energy = freq[i] / 255;
+    const hz = i * binWidth;
+    weightedSum += energy * hz;
+    totalEnergy += energy;
+  }
+  return totalEnergy > 1e-8 ? weightedSum / totalEnergy : 0;
+}
+
+function computeSignatureScore(flatness, crest, centroid) {
+  // Normalize each feature to [0, 1] and combine with weights
+
+  // Flatness: higher = more likely rope (broadband)
+  // Subtract baseline to ignore ambient noise character
+  const adjFlat = Math.max(0, flatness - baselineFlatness * 0.5);
+  let flatScore = Math.min(1, adjFlat / 0.6);
+
+  // Crest factor: rope snaps have high crest (impulsive)
+  let crestScore = Math.min(1, Math.max(0, (crest - CREST_ROPE_MIN) / (CREST_NORM_MAX - CREST_ROPE_MIN)));
+
+  // Centroid: rope is mid-high frequency
+  const adjCent = centroid;
+  let centScore = Math.min(1, Math.max(0, (adjCent - CENT_ROPE_MIN_HZ) / (CENT_ROPE_MAX_HZ - CENT_ROPE_MIN_HZ)));
+
+  // If we have a learned template, blend generic score with template match
+  if (ropeTemplate.count >= 3) {
+    const tFlat  = 1 - Math.min(1, Math.abs(flatness - ropeTemplate.flatness) / 0.4);
+    const tCrest = 1 - Math.min(1, Math.abs(crest - ropeTemplate.crest) / 8);
+    const tCent  = 1 - Math.min(1, Math.abs(centroid - ropeTemplate.centroid) / 4000);
+    flatScore  = flatScore  * (1 - TEMPLATE_BLEND) + tFlat  * TEMPLATE_BLEND;
+    crestScore = crestScore * (1 - TEMPLATE_BLEND) + tCrest * TEMPLATE_BLEND;
+    centScore  = centScore  * (1 - TEMPLATE_BLEND) + tCent  * TEMPLATE_BLEND;
+  }
+
+  return flatScore * SIG_WEIGHT_FLAT + crestScore * SIG_WEIGHT_CREST + centScore * SIG_WEIGHT_CENT;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -809,11 +906,24 @@ function isInWindow(now) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//   SPECTRAL TEMPLATE — learns the user's rope sound
+// ═══════════════════════════════════════════════════════════════
+function updateRopeTemplate(flatness, crest, centroid) {
+  const c = ropeTemplate.count;
+  // Running average
+  ropeTemplate.flatness = (ropeTemplate.flatness * c + flatness) / (c + 1);
+  ropeTemplate.crest    = (ropeTemplate.crest    * c + crest)    / (c + 1);
+  ropeTemplate.centroid = (ropeTemplate.centroid * c + centroid) / (c + 1);
+  ropeTemplate.count++;
+}
+
+// ═══════════════════════════════════════════════════════════════
 //   MAIN AUDIO LOOP
 // ═══════════════════════════════════════════════════════════════
 function audioLoop() {
   if (!isListening) return;
   analyser.getByteTimeDomainData(dataArray);
+  analyser.getByteFrequencyData(freqArray);
 
   const now  = performance.now();
   const peak = computePeak(dataArray);
@@ -835,8 +945,34 @@ function audioLoop() {
   if (peakArmed && lvl >= effThr) {
     const gap = now - lastPeakTime;
     if (gap >= REFRACTORY) {
-      peakArmed = false;
-      onPeak(now);
+      // Spectral gate: compute signature score
+      const flatness = computeSpectralFlatness(freqArray);
+      const crest    = computeCrestFactor(dataArray);
+      const centroid = computeSpectralCentroid(freqArray, audioCtx.sampleRate, analyser.fftSize);
+      const sigScore = computeSignatureScore(flatness, crest, centroid);
+      lastSigScore = sigScore;
+
+      // During IDLE/LEARNING, be lenient (we need peaks to learn from)
+      // During TRACKING, enforce the spectral gate
+      const gateActive = engineState === S.TRACKING || engineState === S.PAUSED;
+      const passesGate = !gateActive || sigScore >= SIG_MIN_SCORE;
+
+      if (passesGate) {
+        peakArmed = false;
+        lastSigRejected = false;
+        // Update rope template during learning and early tracking
+        if (engineState === S.LEARNING || (engineState === S.TRACKING && ropeTemplate.count < 20)) {
+          updateRopeTemplate(flatness, crest, centroid);
+        }
+        onPeak(now);
+        ribbonInfo.textContent = estimatedT > 0
+          ? 'T=' + Math.round(estimatedT) + 'ms  sig=' + sigScore.toFixed(2)
+          : 'sig=' + sigScore.toFixed(2);
+      } else {
+        // Rejected by spectral gate
+        lastSigRejected = true;
+        ribbonInfo.textContent = '✗ rifiutato (sig=' + sigScore.toFixed(2) + ')';
+      }
     }
   }
 
@@ -849,7 +985,7 @@ function audioLoop() {
 async function calibrate() {
   const DURATION = 2300;
   const start    = performance.now();
-  let rmsSum = 0, samples = 0;
+  let rmsSum = 0, flatSum = 0, centSum = 0, samples = 0;
 
   await new Promise(resolve => {
     function tick() {
@@ -858,14 +994,19 @@ async function calibrate() {
       calibBar.style.width  = (pct * 100) + '%';
       calibPct.textContent  = Math.round(pct * 100) + '%';
       analyser.getByteTimeDomainData(dataArray);
-      rmsSum += computeRMS(dataArray);
+      analyser.getByteFrequencyData(freqArray);
+      rmsSum  += computeRMS(dataArray);
+      flatSum += computeSpectralFlatness(freqArray);
+      centSum += computeSpectralCentroid(freqArray, audioCtx.sampleRate, analyser.fftSize);
       samples++;
       elapsed < DURATION ? requestAnimationFrame(tick) : resolve();
     }
     requestAnimationFrame(tick);
   });
 
-  noiseFloor = rmsSum / samples;
+  noiseFloor       = rmsSum  / samples;
+  baselineFlatness = flatSum / samples;
+  baselineCentroid = centSum / samples;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -887,6 +1028,7 @@ async function startListening() {
   analyser.smoothingTimeConstant = 0.15;
   audioCtx.createMediaStreamSource(stream).connect(analyser);
   dataArray = new Uint8Array(analyser.fftSize);
+  freqArray = new Uint8Array(analyser.frequencyBinCount);
 
   badge('state-learning', 'CALIBRAZIONE');
   calibOverlay.classList.add('visible');
@@ -933,6 +1075,9 @@ function resetAll() {
   strikesDone = 0; bestRun = 0; currentRun = 0;
   estimatedT = 0; lastPeakTime = 0; savedT = 0;
   learnBuf = []; history = [];
+  ropeTemplate = { flatness: 0, crest: 0, centroid: 0, count: 0 };
+  baselineFlatness = 0; baselineCentroid = 0;
+  lastSigScore = 0; lastSigRejected = false;
   engineState = S.IDLE;
   badge('state-idle', 'PRONTO');
   sessionStart = null;
