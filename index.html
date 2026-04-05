@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SKIP — Jump Rope Counter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@300;400;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #0a0a0b;
+    --surface:  #111114;
+    --border:   #1e1e24;
+    --accent:   #c8f135;
+    --accent2:  #f13564;
+    --text:     #e8e8ec;
+    --muted:    #4a4a56;
+    --muted2:   #2a2a32;
+    --du-color: #f9a825;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Barlow Condensed', sans-serif;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Grid bg lines ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 60px 60px;
+    opacity: .4;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .app {
+    position: relative;
+    z-index: 1;
+    min-height: 100dvh;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 20px 24px 28px;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 32px;
+  }
+
+  .logo {
+    font-size: 1.6rem;
+    font-weight: 900;
+    letter-spacing: .18em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+
+  .status-pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .72rem;
+    letter-spacing: .06em;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 14px;
+    transition: color .3s, border-color .3s;
+  }
+  .status-pill.active  { color: var(--accent); border-color: var(--accent); }
+  .status-pill.calib   { color: var(--du-color); border-color: var(--du-color); }
+
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .status-pill.active .dot { animation: pulse 1s ease-in-out infinite; }
+
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50%      { opacity: .3; }
+  }
+
+  /* ── Main counter block ── */
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+  }
+
+  .counter-label {
+    font-size: .85rem;
+    font-weight: 600;
+    letter-spacing: .35em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+
+  .counter-main {
+    font-size: clamp(120px, 28vw, 220px);
+    font-weight: 900;
+    line-height: .85;
+    letter-spacing: -.02em;
+    color: var(--text);
+    transition: color .08s;
+    position: relative;
+    user-select: none;
+  }
+
+  .counter-main.flash {
+    color: var(--accent);
+  }
+  .counter-main.flash-du {
+    color: var(--du-color);
+  }
+
+  /* ── Stats row ── */
+  .stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    width: 100%;
+    margin-top: 36px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color .2s;
+  }
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(200,241,53,.04) 0%, transparent 60%);
+    pointer-events: none;
+  }
+  .stat-card.du-card::before {
+    background: linear-gradient(135deg, rgba(249,168,37,.06) 0%, transparent 60%);
+  }
+  .stat-card.bpm-card::before {
+    background: linear-gradient(135deg, rgba(241,53,100,.05) 0%, transparent 60%);
+  }
+
+  .stat-label {
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .3em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .stat-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 2.4rem;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--text);
+    transition: color .15s;
+  }
+  .stat-card.du-card .stat-value  { color: var(--du-color); }
+  .stat-card.bpm-card .stat-value { color: var(--accent2); }
+
+  .stat-sub {
+    font-size: .7rem;
+    color: var(--muted);
+    letter-spacing: .08em;
+  }
+
+  /* ── Level bar ── */
+  .level-wrap {
+    width: 100%;
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .level-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: .7rem;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .level-bar {
+    height: 6px;
+    background: var(--muted2);
+    border-radius: 99px;
+    overflow: hidden;
+  }
+  .level-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent2), var(--accent));
+    border-radius: 99px;
+    transition: width .04s linear;
+  }
+  .threshold-marker {
+    position: relative;
+    height: 10px;
+    margin-top: -8px;
+  }
+  .threshold-line {
+    position: absolute;
+    top: 0;
+    width: 2px;
+    height: 12px;
+    background: var(--accent);
+    border-radius: 99px;
+    transform: translateX(-50%);
+    transition: left .2s;
+  }
+
+  /* ── Controls ── */
+  .controls {
+    margin-top: 28px;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .btn {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    border: none;
+    border-radius: 8px;
+    padding: 14px 32px;
+    cursor: pointer;
+    transition: transform .1s, opacity .2s, background .2s;
+    outline: none;
+  }
+  .btn:active { transform: scale(.96); }
+
+  .btn-start {
+    background: var(--accent);
+    color: #0a0a0b;
+    flex: 1;
+    min-width: 140px;
+  }
+  .btn-start.active {
+    background: var(--accent2);
+    color: #fff;
+  }
+  .btn-reset {
+    background: var(--surface);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 14px 24px;
+  }
+  .btn-reset:hover { border-color: var(--muted); color: var(--text); }
+
+  /* ── Sensitivity slider ── */
+  .sensitivity-wrap {
+    width: 100%;
+    margin-top: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+  .sens-label {
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .3em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+    min-width: 90px;
+  }
+  input[type=range] {
+    -webkit-appearance: none;
+    flex: 1;
+    height: 4px;
+    background: var(--muted2);
+    border-radius: 99px;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    transition: transform .1s;
+  }
+  input[type=range]::-webkit-slider-thumb:active { transform: scale(1.3); }
+  .sens-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .85rem;
+    color: var(--accent);
+    min-width: 36px;
+    text-align: right;
+  }
+
+  /* ── Calibration overlay ── */
+  .calib-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10,10,11,.92);
+    backdrop-filter: blur(6px);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .3s;
+  }
+  .calib-overlay.visible {
+    opacity: 1;
+    pointer-events: all;
+  }
+  .calib-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--du-color);
+  }
+  .calib-sub {
+    font-size: .95rem;
+    color: var(--muted);
+    letter-spacing: .06em;
+    text-align: center;
+    max-width: 320px;
+    line-height: 1.6;
+  }
+  .calib-bar-wrap {
+    width: 280px;
+    height: 6px;
+    background: var(--muted2);
+    border-radius: 99px;
+    overflow: hidden;
+  }
+  .calib-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--du-color), var(--accent));
+    border-radius: 99px;
+    transition: width .1s linear;
+  }
+
+  /* ── History dots ── */
+  .history-wrap {
+    width: 100%;
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+    min-height: 24px;
+  }
+  .h-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: .25;
+    transition: opacity .4s;
+  }
+  .h-dot.active { opacity: 1; }
+  .h-dot.du     { background: var(--du-color); }
+
+  /* ── Footer ── */
+  footer {
+    margin-top: 28px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: .68rem;
+    color: var(--muted);
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* ── Ripple on jump ── */
+  @keyframes ripple {
+    from { transform: scale(1);   opacity: .4; }
+    to   { transform: scale(2.8); opacity: 0;  }
+  }
+  .ripple-ring {
+    position: fixed;
+    pointer-events: none;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    width: 60px; height: 60px;
+    top: 50%; left: 50%;
+    margin: -30px 0 0 -30px;
+    animation: ripple .45s ease-out forwards;
+    z-index: 200;
+  }
+  .ripple-ring.du {
+    border-color: var(--du-color);
+    width: 80px; height: 80px;
+    margin: -40px 0 0 -40px;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 580px) {
+    .stats { grid-template-columns: 1fr 1fr; }
+    .bpm-card { grid-column: span 2; }
+    .controls { gap: 10px; }
+    .sensitivity-wrap { flex-wrap: wrap; }
+    footer { justify-content: center; text-align: center; }
+  }
+  @media (max-width: 380px) {
+    .stats { grid-template-columns: 1fr; }
+    .bpm-card { grid-column: auto; }
+  }
+</style>
+</head>
+<body>
+
+<div class="calib-overlay" id="calibOverlay">
+  <div class="calib-title">Calibrazione</div>
+  <div class="calib-sub">Rimani in silenzio — sto misurando il rumore di fondo per ridurre i falsi positivi.</div>
+  <div class="calib-bar-wrap"><div class="calib-bar" id="calibBar"></div></div>
+  <div style="font-family:'JetBrains Mono',monospace;font-size:.8rem;color:var(--muted)" id="calibPct">0%</div>
+</div>
+
+<div class="app">
+  <header>
+    <div class="logo">SKIP</div>
+    <div class="status-pill" id="statusPill"><div class="dot"></div><span id="statusText">PRONTO</span></div>
+  </header>
+
+  <main class="hero">
+    <div class="counter-label">Salti totali</div>
+    <div class="counter-main" id="counterMain">0</div>
+
+    <div class="stats">
+      <div class="stat-card du-card">
+        <div class="stat-label">Double Under</div>
+        <div class="stat-value" id="duCount">0</div>
+        <div class="stat-sub" id="duPct">— % dei salti</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Salti singoli</div>
+        <div class="stat-value" id="singleCount">0</div>
+        <div class="stat-sub">normali</div>
+      </div>
+      <div class="stat-card bpm-card">
+        <div class="stat-label">Ritmo</div>
+        <div class="stat-value" id="bpmVal">—</div>
+        <div class="stat-sub">salti / minuto</div>
+      </div>
+    </div>
+
+    <div class="level-wrap">
+      <div class="level-header">
+        <span>Livello audio</span>
+        <span id="levelPct">0%</span>
+      </div>
+      <div class="level-bar"><div class="level-fill" id="levelFill"></div></div>
+      <div class="threshold-marker"><div class="threshold-line" id="thresholdLine"></div></div>
+    </div>
+
+    <div class="history-wrap" id="historyWrap"></div>
+
+    <div class="controls">
+      <button class="btn btn-start" id="startBtn">Inizia</button>
+      <button class="btn btn-reset" id="resetBtn">Azzera</button>
+    </div>
+
+    <div class="sensitivity-wrap">
+      <div class="sens-label">Sensibilità</div>
+      <input type="range" id="sensSlider" min="1" max="10" value="5" step="1">
+      <div class="sens-val" id="sensVal">5</div>
+    </div>
+  </main>
+
+  <footer>
+    <span>Web Audio API · FFT Peak Detection</span>
+    <span id="sessionTime">Sessione: 00:00</span>
+  </footer>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════
+const state = {
+  running:     false,
+  totalJumps:  0,
+  doubleUnder: 0,
+  lastPeakTime: 0,
+  lastLastPeakTime: 0,
+  recentIntervals: [],   // last N ms between peaks → BPM
+  noiseFloor:  0,        // calibrated RMS baseline
+  calibrated:  false,
+  sessionStart: null,
+  history: [],           // true = DU, false = single
+  sensitivity: 5,
+};
+
+// Audio
+let audioCtx = null, analyser = null, dataArray = null, stream = null;
+let animFrame = null;
+
+// Thresholds (ms) for double under detection
+const DU_MAX_GAP  = 380; // two peaks within this → DU
+const PEAK_REFRACTORY = 120; // ignore peaks closer than this
+const HIST_MAX = 40;
+
+// ═══════════════════════════════════════════════════
+//  DOM refs
+// ═══════════════════════════════════════════════════
+const $ = id => document.getElementById(id);
+const counterEl   = $('counterMain');
+const duCountEl   = $('duCount');
+const singleEl    = $('singleCount');
+const bpmEl       = $('bpmVal');
+const levelFill   = $('levelFill');
+const levelPct    = $('levelPct');
+const threshLine  = $('thresholdLine');
+const statusPill  = $('statusPill');
+const statusText  = $('statusText');
+const startBtn    = $('startBtn');
+const resetBtn    = $('resetBtn');
+const sensSlider  = $('sensSlider');
+const sensVal     = $('sensVal');
+const historyWrap = $('historyWrap');
+const calibOverlay= $('calibOverlay');
+const calibBar    = $('calibBar');
+const calibPct    = $('calibPct');
+const sessionTime = $('sessionTime');
+
+// ═══════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════
+function computeRMS(arr) {
+  let sum = 0;
+  for (let i = 0; i < arr.length; i++) {
+    const v = (arr[i] - 128) / 128;
+    sum += v * v;
+  }
+  return Math.sqrt(sum / arr.length);
+}
+
+function computePeak(arr) {
+  let max = 0;
+  for (let i = 0; i < arr.length; i++) {
+    const v = Math.abs(arr[i] - 128) / 128;
+    if (v > max) max = v;
+  }
+  return max;
+}
+
+function getThreshold() {
+  // sensitivity 1=hard to trigger (high thr), 10=easy (low thr)
+  const base = state.noiseFloor || 0.01;
+  const mult = 1 + (10 - state.sensitivity) * 0.6; // 1.0 → 6.4
+  return Math.max(base * mult * 2.5, 0.015);
+}
+
+function updateBPM() {
+  const ri = state.recentIntervals;
+  if (ri.length < 2) { bpmEl.textContent = '—'; return; }
+  const avg = ri.reduce((a,b) => a+b, 0) / ri.length;
+  const bpm = Math.round(60000 / avg);
+  bpmEl.textContent = bpm;
+}
+
+function updateStats() {
+  counterEl.textContent  = state.totalJumps;
+  duCountEl.textContent  = state.doubleUnder;
+  singleEl.textContent   = state.totalJumps - state.doubleUnder;
+  const pct = state.totalJumps > 0
+    ? Math.round((state.doubleUnder / state.totalJumps) * 100)
+    : 0;
+  $('duPct').textContent = state.totalJumps > 0 ? `${pct}% dei salti` : '— % dei salti';
+}
+
+function spawnRipple(isDU) {
+  const el = document.createElement('div');
+  el.className = 'ripple-ring' + (isDU ? ' du' : '');
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 500);
+}
+
+function flashCounter(isDU) {
+  counterEl.classList.remove('flash', 'flash-du');
+  void counterEl.offsetWidth; // reflow
+  counterEl.classList.add(isDU ? 'flash-du' : 'flash');
+  setTimeout(() => counterEl.classList.remove('flash', 'flash-du'), 120);
+}
+
+function addHistory(isDU) {
+  state.history.push(isDU);
+  if (state.history.length > HIST_MAX) state.history.shift();
+  historyWrap.innerHTML = '';
+  state.history.forEach(du => {
+    const d = document.createElement('div');
+    d.className = 'h-dot active' + (du ? ' du' : '');
+    historyWrap.appendChild(d);
+  });
+}
+
+function updateSessionTimer() {
+  if (!state.sessionStart) return;
+  const s = Math.floor((Date.now() - state.sessionStart) / 1000);
+  const mm = String(Math.floor(s/60)).padStart(2,'0');
+  const ss = String(s % 60).padStart(2,'0');
+  sessionTime.textContent = `Sessione: ${mm}:${ss}`;
+}
+
+// ═══════════════════════════════════════════════════
+//  CALIBRATION
+// ═══════════════════════════════════════════════════
+async function calibrate(analyserNode, buf) {
+  return new Promise(resolve => {
+    const DURATION = 2200; // ms
+    const start = performance.now();
+    let rmsSum = 0, samples = 0;
+
+    function tick() {
+      const now = performance.now();
+      const elapsed = now - start;
+      const pct = Math.min(elapsed / DURATION, 1);
+      calibBar.style.width = (pct * 100) + '%';
+      calibPct.textContent = Math.round(pct * 100) + '%';
+
+      analyserNode.getByteTimeDomainData(buf);
+      rmsSum += computeRMS(buf);
+      samples++;
+
+      if (elapsed < DURATION) {
+        requestAnimationFrame(tick);
+      } else {
+        state.noiseFloor = rmsSum / samples;
+        state.calibrated = true;
+        resolve();
+      }
+    }
+    requestAnimationFrame(tick);
+  });
+}
+
+// ═══════════════════════════════════════════════════
+//  PEAK DETECTION LOOP
+// ═══════════════════════════════════════════════════
+let peakArmed = false; // must fall below threshold before next peak counts
+
+function processPeak() {
+  const now = performance.now();
+  const timeSinceLast = now - state.lastPeakTime;
+  if (timeSinceLast < PEAK_REFRACTORY) return;
+
+  const gap = timeSinceLast;
+  const isDU = (gap < DU_MAX_GAP) && (state.totalJumps > 0);
+
+  state.totalJumps++;
+  if (isDU) state.doubleUnder++;
+
+  // BPM
+  state.recentIntervals.push(gap);
+  if (state.recentIntervals.length > 12) state.recentIntervals.shift();
+
+  state.lastPeakTime = now;
+
+  updateStats();
+  updateBPM();
+  flashCounter(isDU);
+  spawnRipple(isDU);
+  addHistory(isDU);
+}
+
+function audioLoop() {
+  if (!state.running) return;
+  analyser.getByteTimeDomainData(dataArray);
+
+  const rms  = computeRMS(dataArray);
+  const peak = computePeak(dataArray);
+  const level = Math.min(peak * 1.6, 1);
+  const thr   = getThreshold();
+
+  // Level bar
+  const pct = Math.round(level * 100);
+  levelFill.style.width = pct + '%';
+  levelPct.textContent  = pct + '%';
+
+  // Threshold marker
+  const thrPct = Math.min(thr * 1.6 * 100, 100);
+  threshLine.style.left = thrPct + '%';
+
+  // Hysteresis: arm when below, fire when above
+  if (level < thr * 0.55) {
+    peakArmed = true;
+  }
+  if (peakArmed && level >= thr) {
+    peakArmed = false;
+    processPeak();
+  }
+
+  animFrame = requestAnimationFrame(audioLoop);
+}
+
+// ═══════════════════════════════════════════════════
+//  START / STOP
+// ═══════════════════════════════════════════════════
+async function startListening() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }, video: false });
+  } catch(e) {
+    alert('Impossibile accedere al microfono: ' + e.message);
+    return;
+  }
+
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 1024;
+  analyser.smoothingTimeConstant = 0.2;
+
+  const src = audioCtx.createMediaStreamSource(stream);
+  src.connect(analyser);
+
+  dataArray = new Uint8Array(analyser.fftSize);
+
+  // Calibration
+  statusPill.className = 'status-pill calib';
+  statusText.textContent = 'CALIBRAZIONE';
+  calibOverlay.classList.add('visible');
+
+  await calibrate(analyser, dataArray);
+
+  calibOverlay.classList.remove('visible');
+  state.running = true;
+  state.sessionStart = Date.now();
+
+  setInterval(updateSessionTimer, 1000);
+
+  statusPill.className = 'status-pill active';
+  statusText.textContent = 'IN ASCOLTO';
+  startBtn.textContent = 'Ferma';
+  startBtn.classList.add('active');
+
+  peakArmed = false;
+  audioLoop();
+}
+
+function stopListening() {
+  state.running = false;
+  cancelAnimationFrame(animFrame);
+
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+
+  statusPill.className = 'status-pill';
+  statusText.textContent = 'FERMO';
+  startBtn.textContent = 'Riprendi';
+  startBtn.classList.remove('active');
+
+  levelFill.style.width = '0%';
+  levelPct.textContent  = '0%';
+}
+
+function resetAll() {
+  Object.assign(state, {
+    totalJumps: 0, doubleUnder: 0,
+    lastPeakTime: 0, lastLastPeakTime: 0,
+    recentIntervals: [], history: [],
+    sessionStart: state.running ? Date.now() : null,
+  });
+  updateStats();
+  bpmEl.textContent = '—';
+  historyWrap.innerHTML = '';
+  sessionTime.textContent = 'Sessione: 00:00';
+}
+
+// ═══════════════════════════════════════════════════
+//  EVENTS
+// ═══════════════════════════════════════════════════
+startBtn.addEventListener('click', () => {
+  if (!state.running) startListening();
+  else stopListening();
+});
+
+resetBtn.addEventListener('click', resetAll);
+
+sensSlider.addEventListener('input', () => {
+  state.sensitivity = +sensSlider.value;
+  sensVal.textContent = state.sensitivity;
+  // Update threshold marker immediately
+  if (state.calibrated) {
+    const thr    = getThreshold();
+    const thrPct = Math.min(thr * 1.6 * 100, 100);
+    threshLine.style.left = thrPct + '%';
+  }
+});
+
+// Init history dots
+for (let i = 0; i < HIST_MAX; i++) {
+  const d = document.createElement('div');
+  d.className = 'h-dot';
+  historyWrap.appendChild(d);
+}
+</script>
+</body>
+</html>
