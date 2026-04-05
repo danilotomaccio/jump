@@ -8,15 +8,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@300;400;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg:       #0a0a0b;
-    --surface:  #111114;
-    --border:   #1e1e24;
-    --accent:   #c8f135;
-    --accent2:  #f13564;
-    --text:     #e8e8ec;
-    --muted:    #4a4a56;
-    --muted2:   #2a2a32;
-    --du-color: #f9a825;
+    --bg:        #0a0a0b;
+    --surface:   #111114;
+    --border:    #1e1e24;
+    --accent:    #c8f135;
+    --accent2:   #f13564;
+    --text:      #e8e8ec;
+    --muted:     #4a4a56;
+    --muted2:    #2a2a32;
+    --du-color:  #f9a825;
+    --str-color: #38d9f5;
   }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -30,16 +31,14 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* ── Grid bg lines ── */
   body::before {
     content: '';
-    position: fixed;
-    inset: 0;
+    position: fixed; inset: 0;
     background-image:
       linear-gradient(var(--border) 1px, transparent 1px),
       linear-gradient(90deg, var(--border) 1px, transparent 1px);
     background-size: 60px 60px;
-    opacity: .4;
+    opacity: .35;
     pointer-events: none;
     z-index: 0;
   }
@@ -50,36 +49,38 @@
     min-height: 100dvh;
     display: grid;
     grid-template-rows: auto 1fr auto;
-    max-width: 900px;
+    max-width: 940px;
     margin: 0 auto;
     padding: 20px 24px 28px;
   }
 
-  /* ── Header ── */
+  /* ─── Header ─── */
   header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding-bottom: 20px;
+    padding-bottom: 18px;
     border-bottom: 1px solid var(--border);
-    margin-bottom: 32px;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+    gap: 10px;
   }
 
   .logo {
     font-size: 1.6rem;
     font-weight: 900;
-    letter-spacing: .18em;
+    letter-spacing: .2em;
     color: var(--accent);
     text-transform: uppercase;
   }
 
-  .status-pill {
+  .engine-badge {
     display: flex;
     align-items: center;
     gap: 8px;
     font-family: 'JetBrains Mono', monospace;
     font-size: .72rem;
-    letter-spacing: .06em;
+    letter-spacing: .07em;
     color: var(--muted);
     background: var(--surface);
     border: 1px solid var(--border);
@@ -87,330 +88,311 @@
     padding: 6px 14px;
     transition: color .3s, border-color .3s;
   }
-  .status-pill.active  { color: var(--accent); border-color: var(--accent); }
-  .status-pill.calib   { color: var(--du-color); border-color: var(--du-color); }
-
-  .dot {
+  .engine-badge .dot {
     width: 7px; height: 7px;
     border-radius: 50%;
     background: currentColor;
+    flex-shrink: 0;
   }
-  .status-pill.active .dot { animation: pulse 1s ease-in-out infinite; }
+  .engine-badge.state-idle     { color: var(--muted); }
+  .engine-badge.state-learning { color: var(--du-color); border-color: var(--du-color); }
+  .engine-badge.state-tracking { color: var(--accent);   border-color: var(--accent);   }
+  .engine-badge.state-paused   { color: var(--str-color);border-color: var(--str-color);}
+  .engine-badge.state-tracking .dot { animation: blink 1s ease-in-out infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
 
-  @keyframes pulse {
-    0%,100% { opacity: 1; }
-    50%      { opacity: .3; }
-  }
-
-  /* ── Main counter block ── */
-  .hero {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0;
-  }
+  /* ─── Hero ─── */
+  .hero { display: flex; flex-direction: column; align-items: center; }
 
   .counter-label {
-    font-size: .85rem;
+    font-size: .82rem;
     font-weight: 600;
-    letter-spacing: .35em;
+    letter-spacing: .38em;
     text-transform: uppercase;
     color: var(--muted);
-    margin-bottom: 4px;
+    margin-bottom: 2px;
   }
 
   .counter-main {
-    font-size: clamp(120px, 28vw, 220px);
+    font-size: clamp(110px, 26vw, 210px);
     font-weight: 900;
     line-height: .85;
     letter-spacing: -.02em;
     color: var(--text);
-    transition: color .08s;
-    position: relative;
+    transition: color .07s;
     user-select: none;
   }
+  .counter-main.flash    { color: var(--accent); }
+  .counter-main.flash-du { color: var(--du-color); }
 
-  .counter-main.flash {
-    color: var(--accent);
-  }
-  .counter-main.flash-du {
-    color: var(--du-color);
-  }
-
-  /* ── Stats row ── */
-  .stats {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 12px;
+  /* ─── Tempo Ribbon ─── */
+  .tempo-ribbon {
     width: 100%;
-    margin-top: 36px;
+    margin-top: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .ribbon-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .ribbon-track {
+    position: relative;
+    height: 8px;
+    background: var(--muted2);
+    border-radius: 99px;
+    overflow: hidden;
+  }
+  .ribbon-window {
+    position: absolute;
+    top: 0; bottom: 0;
+    background: rgba(200,241,53,.2);
+    border-radius: 99px;
+    transition: left .05s, width .05s, opacity .25s;
+    opacity: 0;
+  }
+  .ribbon-level {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent2), var(--accent));
+    border-radius: 99px;
+    transition: width .04s linear;
+  }
+  /* threshold markers — outside the overflow:hidden track */
+  .ribbon-markers {
+    position: relative;
+    height: 12px;
+    margin-top: -10px;
+    pointer-events: none;
+  }
+  .thr-marker {
+    position: absolute;
+    top: 0;
+    width: 2px;
+    height: 14px;
+    border-radius: 99px;
+    transform: translateX(-50%);
+    transition: left .2s;
+  }
+  .thr-normal { background: var(--accent);              }
+  .thr-low    { background: rgba(200,241,53,.5); transition: left .05s, opacity .2s; }
+
+  /* ─── Stats ─── */
+  .stats {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-top: 18px;
   }
 
   .stat-card {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 18px 20px 16px;
+    padding: 16px 18px 14px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
     position: relative;
     overflow: hidden;
-    transition: border-color .2s;
   }
   .stat-card::before {
-    content: '';
-    position: absolute;
-    inset: 0;
+    content: ''; position: absolute; inset: 0;
     background: linear-gradient(135deg, rgba(200,241,53,.04) 0%, transparent 60%);
     pointer-events: none;
   }
-  .stat-card.du-card::before {
-    background: linear-gradient(135deg, rgba(249,168,37,.06) 0%, transparent 60%);
-  }
-  .stat-card.bpm-card::before {
-    background: linear-gradient(135deg, rgba(241,53,100,.05) 0%, transparent 60%);
-  }
+  .stat-card.du-card::before   { background: linear-gradient(135deg,rgba(249,168,37,.06) 0%,transparent 60%); }
+  .stat-card.bpm-card::before  { background: linear-gradient(135deg,rgba(241,53,100,.05) 0%,transparent 60%); }
+  .stat-card.str-card::before  { background: linear-gradient(135deg,rgba(56,217,245,.05) 0%,transparent 60%); }
+  .stat-card.best-card::before { background: linear-gradient(135deg,rgba(56,217,245,.03) 0%,transparent 60%); }
 
   .stat-label {
-    font-size: .72rem;
-    font-weight: 600;
-    letter-spacing: .3em;
-    text-transform: uppercase;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .3em; text-transform: uppercase;
     color: var(--muted);
   }
-
   .stat-value {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 2.4rem;
-    font-weight: 700;
-    line-height: 1;
+    font-size: 2.2rem; font-weight: 700; line-height: 1;
     color: var(--text);
-    transition: color .15s;
   }
-  .stat-card.du-card .stat-value  { color: var(--du-color); }
-  .stat-card.bpm-card .stat-value { color: var(--accent2); }
+  .stat-card.du-card   .stat-value { color: var(--du-color);  }
+  .stat-card.bpm-card  .stat-value { color: var(--accent2);   }
+  .stat-card.str-card  .stat-value { color: var(--str-color); }
+  .stat-card.best-card .stat-value { color: var(--str-color); }
+  .stat-sub { font-size: .67rem; color: var(--muted); letter-spacing: .06em; }
 
-  .stat-sub {
-    font-size: .7rem;
-    color: var(--muted);
-    letter-spacing: .08em;
-  }
-
-  /* ── Level bar ── */
-  .level-wrap {
+  /* ─── Run bar ─── */
+  .run-bar-wrap {
     width: 100%;
-    margin-top: 20px;
+    margin-top: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 18px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 7px;
   }
-  .level-header {
+  .run-bar-header {
     display: flex;
     justify-content: space-between;
-    font-size: .7rem;
-    letter-spacing: .18em;
-    text-transform: uppercase;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .24em; text-transform: uppercase;
     color: var(--muted);
-    font-weight: 600;
   }
-  .level-bar {
-    height: 6px;
+  .run-bar-track {
+    height: 5px;
     background: var(--muted2);
     border-radius: 99px;
     overflow: hidden;
   }
-  .level-fill {
+  .run-bar-fill {
     height: 100%;
     width: 0%;
-    background: linear-gradient(90deg, var(--accent2), var(--accent));
+    background: linear-gradient(90deg, var(--str-color), var(--accent));
     border-radius: 99px;
-    transition: width .04s linear;
-  }
-  .threshold-marker {
-    position: relative;
-    height: 10px;
-    margin-top: -8px;
-  }
-  .threshold-line {
-    position: absolute;
-    top: 0;
-    width: 2px;
-    height: 12px;
-    background: var(--accent);
-    border-radius: 99px;
-    transform: translateX(-50%);
-    transition: left .2s;
+    transition: width .25s ease;
   }
 
-  /* ── Controls ── */
-  .controls {
-    margin-top: 28px;
+  /* ─── History ─── */
+  .history-wrap {
+    width: 100%;
     display: flex;
-    gap: 12px;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-top: 14px;
+    min-height: 20px;
+  }
+  .h-dot {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: .16;
+    transition: opacity .3s, background .2s;
+  }
+  .h-dot.active { opacity: 1; }
+  .h-dot.du     { background: var(--du-color); }
+  .h-dot.run-sep {
+    background: var(--str-color);
+    border-radius: 2px;
+    width: 3px;
+    opacity: .55;
+  }
+
+  /* ─── Controls ─── */
+  .controls {
+    width: 100%;
+    margin-top: 18px;
+    display: flex;
+    gap: 10px;
     flex-wrap: wrap;
     align-items: center;
   }
 
   .btn {
     font-family: 'Barlow Condensed', sans-serif;
-    font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: .18em;
-    text-transform: uppercase;
-    border: none;
-    border-radius: 8px;
-    padding: 14px 32px;
+    font-size: 1.05rem; font-weight: 700;
+    letter-spacing: .18em; text-transform: uppercase;
+    border: none; border-radius: 8px;
+    padding: 13px 30px;
     cursor: pointer;
-    transition: transform .1s, opacity .2s, background .2s;
+    transition: transform .1s, background .2s, color .2s;
     outline: none;
   }
   .btn:active { transform: scale(.96); }
-
-  .btn-start {
-    background: var(--accent);
-    color: #0a0a0b;
-    flex: 1;
-    min-width: 140px;
-  }
-  .btn-start.active {
-    background: var(--accent2);
-    color: #fff;
-  }
+  .btn-start { background: var(--accent); color: #0a0a0b; flex: 1; min-width: 140px; }
+  .btn-start.active { background: var(--accent2); color: #fff; }
   .btn-reset {
     background: var(--surface);
     color: var(--muted);
     border: 1px solid var(--border);
-    padding: 14px 24px;
+    padding: 13px 22px;
   }
   .btn-reset:hover { border-color: var(--muted); color: var(--text); }
 
-  /* ── Sensitivity slider ── */
+  /* ─── Sensitivity ─── */
   .sensitivity-wrap {
     width: 100%;
     margin-top: 4px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 18px 20px;
+    padding: 16px 18px;
     display: flex;
     align-items: center;
-    gap: 18px;
+    gap: 16px;
   }
   .sens-label {
-    font-size: .72rem;
-    font-weight: 600;
-    letter-spacing: .3em;
-    text-transform: uppercase;
-    color: var(--muted);
-    white-space: nowrap;
-    min-width: 90px;
+    font-size: .68rem; font-weight: 600;
+    letter-spacing: .28em; text-transform: uppercase;
+    color: var(--muted); white-space: nowrap; min-width: 88px;
   }
   input[type=range] {
-    -webkit-appearance: none;
-    flex: 1;
-    height: 4px;
-    background: var(--muted2);
-    border-radius: 99px;
-    outline: none;
-    cursor: pointer;
+    -webkit-appearance: none; flex: 1; height: 4px;
+    background: var(--muted2); border-radius: 99px;
+    outline: none; cursor: pointer;
   }
   input[type=range]::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 18px; height: 18px;
-    border-radius: 50%;
-    background: var(--accent);
-    border: 2px solid var(--bg);
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--bg);
     transition: transform .1s;
   }
   input[type=range]::-webkit-slider-thumb:active { transform: scale(1.3); }
   .sens-val {
     font-family: 'JetBrains Mono', monospace;
-    font-size: .85rem;
-    color: var(--accent);
-    min-width: 36px;
-    text-align: right;
+    font-size: .85rem; color: var(--accent);
+    min-width: 32px; text-align: right;
   }
 
-  /* ── Calibration overlay ── */
+  /* ─── Calibration overlay ─── */
   .calib-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(10,10,11,.92);
-    backdrop-filter: blur(6px);
+    position: fixed; inset: 0;
+    background: rgba(10,10,11,.93);
+    backdrop-filter: blur(8px);
     z-index: 100;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 24px;
-    opacity: 0;
-    pointer-events: none;
+    gap: 22px;
+    opacity: 0; pointer-events: none;
     transition: opacity .3s;
   }
-  .calib-overlay.visible {
-    opacity: 1;
-    pointer-events: all;
-  }
-  .calib-title {
-    font-size: 1.4rem;
-    font-weight: 700;
-    letter-spacing: .22em;
-    text-transform: uppercase;
-    color: var(--du-color);
-  }
-  .calib-sub {
-    font-size: .95rem;
-    color: var(--muted);
-    letter-spacing: .06em;
-    text-align: center;
-    max-width: 320px;
-    line-height: 1.6;
-  }
-  .calib-bar-wrap {
-    width: 280px;
-    height: 6px;
-    background: var(--muted2);
-    border-radius: 99px;
-    overflow: hidden;
-  }
-  .calib-bar {
-    height: 100%;
-    width: 0%;
-    background: linear-gradient(90deg, var(--du-color), var(--accent));
-    border-radius: 99px;
-    transition: width .1s linear;
-  }
+  .calib-overlay.visible { opacity: 1; pointer-events: all; }
+  .calib-title { font-size: 1.4rem; font-weight: 700; letter-spacing: .22em; text-transform: uppercase; color: var(--du-color); }
+  .calib-sub   { font-size: .92rem; color: var(--muted); text-align: center; max-width: 300px; line-height: 1.65; }
+  .calib-bar-wrap { width: 280px; height: 6px; background: var(--muted2); border-radius: 99px; overflow: hidden; }
+  .calib-bar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--du-color), var(--accent)); border-radius: 99px; }
 
-  /* ── History dots ── */
-  .history-wrap {
-    width: 100%;
-    display: flex;
-    gap: 5px;
-    flex-wrap: wrap;
-    margin-top: 16px;
-    min-height: 24px;
+  /* ─── Ripple ─── */
+  @keyframes ripple { from{transform:scale(1);opacity:.4} to{transform:scale(3);opacity:0} }
+  .ripple-ring {
+    position: fixed; pointer-events: none; border-radius: 50%;
+    border: 2px solid var(--accent);
+    width: 60px; height: 60px;
+    top: 50%; left: 50%; margin: -30px 0 0 -30px;
+    animation: ripple .5s ease-out forwards; z-index: 200;
   }
-  .h-dot {
-    width: 10px; height: 10px;
-    border-radius: 50%;
-    background: var(--accent);
-    opacity: .25;
-    transition: opacity .4s;
-  }
-  .h-dot.active { opacity: 1; }
-  .h-dot.du     { background: var(--du-color); }
+  .ripple-ring.du { border-color: var(--du-color); width: 80px; height: 80px; margin: -40px 0 0 -40px; }
 
-  /* ── Footer ── */
+  /* ─── Footer ─── */
   footer {
-    margin-top: 28px;
-    padding-top: 18px;
+    margin-top: 24px;
+    padding-top: 16px;
     border-top: 1px solid var(--border);
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    font-size: .68rem;
+    font-size: .66rem;
     color: var(--muted);
     letter-spacing: .14em;
     text-transform: uppercase;
@@ -418,39 +400,14 @@
     gap: 8px;
   }
 
-  /* ── Ripple on jump ── */
-  @keyframes ripple {
-    from { transform: scale(1);   opacity: .4; }
-    to   { transform: scale(2.8); opacity: 0;  }
-  }
-  .ripple-ring {
-    position: fixed;
-    pointer-events: none;
-    border-radius: 50%;
-    border: 2px solid var(--accent);
-    width: 60px; height: 60px;
-    top: 50%; left: 50%;
-    margin: -30px 0 0 -30px;
-    animation: ripple .45s ease-out forwards;
-    z-index: 200;
-  }
-  .ripple-ring.du {
-    border-color: var(--du-color);
-    width: 80px; height: 80px;
-    margin: -40px 0 0 -40px;
-  }
-
-  /* ── Responsive ── */
-  @media (max-width: 580px) {
+  /* ─── Responsive ─── */
+  @media (max-width: 620px) {
     .stats { grid-template-columns: 1fr 1fr; }
     .bpm-card { grid-column: span 2; }
-    .controls { gap: 10px; }
-    .sensitivity-wrap { flex-wrap: wrap; }
-    footer { justify-content: center; text-align: center; }
   }
-  @media (max-width: 380px) {
-    .stats { grid-template-columns: 1fr; }
-    .bpm-card { grid-column: auto; }
+  @media (max-width: 400px) {
+    .stats { grid-template-columns: 1fr 1fr; }
+    .bpm-card, .best-card { grid-column: span 2; }
   }
 </style>
 </head>
@@ -458,7 +415,7 @@
 
 <div class="calib-overlay" id="calibOverlay">
   <div class="calib-title">Calibrazione</div>
-  <div class="calib-sub">Rimani in silenzio — sto misurando il rumore di fondo per ridurre i falsi positivi.</div>
+  <div class="calib-sub">Rimani in silenzio — misuro il rumore di fondo per ridurre i falsi positivi.</div>
   <div class="calib-bar-wrap"><div class="calib-bar" id="calibBar"></div></div>
   <div style="font-family:'JetBrains Mono',monospace;font-size:.8rem;color:var(--muted)" id="calibPct">0%</div>
 </div>
@@ -466,38 +423,70 @@
 <div class="app">
   <header>
     <div class="logo">SKIP</div>
-    <div class="status-pill" id="statusPill"><div class="dot"></div><span id="statusText">PRONTO</span></div>
+    <div class="engine-badge state-idle" id="engineBadge">
+      <div class="dot"></div>
+      <span id="engineLabel">PRONTO</span>
+    </div>
   </header>
 
   <main class="hero">
     <div class="counter-label">Salti totali</div>
     <div class="counter-main" id="counterMain">0</div>
 
+    <div class="tempo-ribbon">
+      <div class="ribbon-header">
+        <span>Livello audio</span>
+        <span id="ribbonInfo">—</span>
+      </div>
+      <div class="ribbon-track">
+        <div class="ribbon-window" id="ribbonWindow"></div>
+        <div class="ribbon-level"  id="ribbonLevel"></div>
+      </div>
+      <div class="ribbon-markers">
+        <div class="thr-marker thr-normal" id="thrNormal" style="left:0%"></div>
+        <div class="thr-marker thr-low"    id="thrLow"    style="left:0%;opacity:0"></div>
+      </div>
+    </div>
+
     <div class="stats">
       <div class="stat-card du-card">
         <div class="stat-label">Double Under</div>
         <div class="stat-value" id="duCount">0</div>
-        <div class="stat-sub" id="duPct">— % dei salti</div>
+        <div class="stat-sub"   id="duPct">—</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Salti singoli</div>
+        <div class="stat-label">Singoli</div>
         <div class="stat-value" id="singleCount">0</div>
-        <div class="stat-sub">normali</div>
+        <div class="stat-sub">salti normali</div>
       </div>
       <div class="stat-card bpm-card">
         <div class="stat-label">Ritmo</div>
         <div class="stat-value" id="bpmVal">—</div>
-        <div class="stat-sub">salti / minuto</div>
+        <div class="stat-sub">salti / min</div>
+      </div>
+      <div class="stat-card str-card">
+        <div class="stat-label">Serie</div>
+        <div class="stat-value" id="strikeCount">0</div>
+        <div class="stat-sub">run completati</div>
+      </div>
+      <div class="stat-card best-card">
+        <div class="stat-label">Best run</div>
+        <div class="stat-value" id="bestRun">0</div>
+        <div class="stat-sub">salti consecutivi</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Run attuale</div>
+        <div class="stat-value" id="currentRun">0</div>
+        <div class="stat-sub"   id="currentRunSub">—</div>
       </div>
     </div>
 
-    <div class="level-wrap">
-      <div class="level-header">
-        <span>Livello audio</span>
-        <span id="levelPct">0%</span>
+    <div class="run-bar-wrap" id="runBarWrap" style="display:none">
+      <div class="run-bar-header">
+        <span>Run attuale vs best</span>
+        <span id="runBarPct">0%</span>
       </div>
-      <div class="level-bar"><div class="level-fill" id="levelFill"></div></div>
-      <div class="threshold-marker"><div class="threshold-line" id="thresholdLine"></div></div>
+      <div class="run-bar-track"><div class="run-bar-fill" id="runBarFill"></div></div>
     </div>
 
     <div class="history-wrap" id="historyWrap"></div>
@@ -515,330 +504,566 @@
   </main>
 
   <footer>
-    <span>Web Audio API · FFT Peak Detection</span>
+    <span>Adaptive Tempo Tracking · Web Audio API</span>
     <span id="sessionTime">Sessione: 00:00</span>
   </footer>
 </div>
 
 <script>
-// ═══════════════════════════════════════════════════
-//  STATE
-// ═══════════════════════════════════════════════════
-const state = {
-  running:     false,
-  totalJumps:  0,
-  doubleUnder: 0,
-  lastPeakTime: 0,
-  lastLastPeakTime: 0,
-  recentIntervals: [],   // last N ms between peaks → BPM
-  noiseFloor:  0,        // calibrated RMS baseline
-  calibrated:  false,
-  sessionStart: null,
-  history: [],           // true = DU, false = single
-  sensitivity: 5,
-};
+// ═══════════════════════════════════════════════════════════════
+//   ENGINE CONSTANTS
+// ═══════════════════════════════════════════════════════════════
+
+const S = { IDLE: 'IDLE', LEARNING: 'LEARNING', TRACKING: 'TRACKING', PAUSED: 'PAUSED' };
+
+// Learning
+const N_LEARN       = 4;     // peaks to collect before locking tempo
+
+// Prediction window
+const W_FACTOR      = 0.28;  // window = ±28% of T around next expected peak
+const THR_WIN_MULT  = 0.58;  // threshold inside window = 58% of normal
+
+// Double under: gap < T × DU_RATIO is a double under
+const DU_RATIO      = 0.44;
+
+// Tempo EMA: lower = slower to change, more stable
+const TEMPO_ALPHA   = 0.22;
+
+// Pause detection
+const PAUSE_MULT    = 2.6;   // no peak for T × PAUSE_MULT → pause
+const PAUSE_ABS     = 2800;  // absolute ceiling (ms) — even for very slow jumpers
+
+// After a pause shorter than RESUME_GRACE ms, skip re-learning and trust old T
+const RESUME_GRACE  = 9000;
+
+// Hard floor: ignore peaks closer than this (prevents double-firing on one hit)
+const REFRACTORY    = 110;
+
+const HIST_MAX      = 48;
+const RIBBON_SCALE  = 1.6;   // visual gain on level bar
+
+// ═══════════════════════════════════════════════════════════════
+//   MUTABLE STATE
+// ═══════════════════════════════════════════════════════════════
+let engineState  = S.IDLE;
+let estimatedT   = 0;       // current period estimate (ms), EMA-smoothed
+let lastPeakTime = 0;       // timestamp of last confirmed peak (performance.now)
+let learnBuf     = [];      // raw timestamps during learning
+let peakArmed    = false;   // hysteresis gate
+
+// Counters
+let totalJumps   = 0;
+let duJumps      = 0;
+let strikesDone  = 0;   // completed runs
+let bestRun      = 0;   // best run (jumps)
+let currentRun   = 0;   // jumps in this run
+let savedT       = 0;   // T preserved across a pause (for fast resume)
+
+// Session
+let noiseFloor   = 0;
+let sensitivity  = 5;
+let sessionStart = null;
+let timerHandle  = null;
+
+// History
+let history = [];   // { du: bool, sep: bool }
 
 // Audio
 let audioCtx = null, analyser = null, dataArray = null, stream = null;
-let animFrame = null;
+let rafHandle  = null;
+let isListening = false;
 
-// Thresholds (ms) for double under detection
-const DU_MAX_GAP  = 380; // two peaks within this → DU
-const PEAK_REFRACTORY = 120; // ignore peaks closer than this
-const HIST_MAX = 40;
-
-// ═══════════════════════════════════════════════════
-//  DOM refs
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//   DOM
+// ═══════════════════════════════════════════════════════════════
 const $ = id => document.getElementById(id);
-const counterEl   = $('counterMain');
-const duCountEl   = $('duCount');
-const singleEl    = $('singleCount');
-const bpmEl       = $('bpmVal');
-const levelFill   = $('levelFill');
-const levelPct    = $('levelPct');
-const threshLine  = $('thresholdLine');
-const statusPill  = $('statusPill');
-const statusText  = $('statusText');
-const startBtn    = $('startBtn');
-const resetBtn    = $('resetBtn');
-const sensSlider  = $('sensSlider');
-const sensVal     = $('sensVal');
-const historyWrap = $('historyWrap');
-const calibOverlay= $('calibOverlay');
-const calibBar    = $('calibBar');
-const calibPct    = $('calibPct');
-const sessionTime = $('sessionTime');
+const counterEl     = $('counterMain');
+const duCountEl     = $('duCount');
+const singleEl      = $('singleCount');
+const bpmEl         = $('bpmVal');
+const strikeEl      = $('strikeCount');
+const bestRunEl     = $('bestRun');
+const currentRunEl  = $('currentRun');
+const currentRunSub = $('currentRunSub');
+const duPctEl       = $('duPct');
+const ribbonLevel   = $('ribbonLevel');
+const ribbonWindow  = $('ribbonWindow');
+const thrNormal     = $('thrNormal');
+const thrLow        = $('thrLow');
+const ribbonInfo    = $('ribbonInfo');
+const engineBadge   = $('engineBadge');
+const engineLabel   = $('engineLabel');
+const historyWrap   = $('historyWrap');
+const runBarWrap    = $('runBarWrap');
+const runBarFill    = $('runBarFill');
+const runBarPct     = $('runBarPct');
+const startBtn      = $('startBtn');
+const calibOverlay  = $('calibOverlay');
+const calibBar      = $('calibBar');
+const calibPct      = $('calibPct');
+const sessionTime   = $('sessionTime');
 
-// ═══════════════════════════════════════════════════
-//  HELPERS
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//   AUDIO HELPERS
+// ═══════════════════════════════════════════════════════════════
 function computeRMS(arr) {
-  let sum = 0;
-  for (let i = 0; i < arr.length; i++) {
-    const v = (arr[i] - 128) / 128;
-    sum += v * v;
-  }
-  return Math.sqrt(sum / arr.length);
+  let s = 0;
+  for (let i = 0; i < arr.length; i++) { const v = (arr[i] - 128) / 128; s += v * v; }
+  return Math.sqrt(s / arr.length);
 }
 
 function computePeak(arr) {
-  let max = 0;
-  for (let i = 0; i < arr.length; i++) {
-    const v = Math.abs(arr[i] - 128) / 128;
-    if (v > max) max = v;
+  let m = 0;
+  for (let i = 0; i < arr.length; i++) { const v = Math.abs(arr[i] - 128) / 128; if (v > m) m = v; }
+  return m;
+}
+
+function baseThreshold() {
+  const base = noiseFloor || 0.012;
+  // sens 1 → multiplier ~6.2×  |  sens 10 → multiplier ~1×
+  const mult = 1 + (10 - sensitivity) * 0.58;
+  return Math.max(base * mult * 2.6, 0.016);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   STATE MACHINE TRANSITIONS
+// ═══════════════════════════════════════════════════════════════
+function enterLearning() {
+  engineState = S.LEARNING;
+  learnBuf    = [];
+  badge('state-learning', 'APPRENDIMENTO');
+}
+
+function enterTracking() {
+  engineState = S.TRACKING;
+  badge('state-tracking', 'TRACKING');
+}
+
+function enterPaused(now) {
+  savedT = estimatedT;
+
+  // Close the current run
+  if (currentRun > 0) {
+    strikesDone++;
+    if (currentRun > bestRun) bestRun = currentRun;
+    addSeparator();
   }
-  return max;
+  currentRun  = 0;
+  engineState = S.PAUSED;
+
+  badge('state-paused', 'PAUSA');
+  updateStats();
+  ribbonWindow.style.opacity = '0';
+  thrLow.style.opacity = '0';
 }
 
-function getThreshold() {
-  // sensitivity 1=hard to trigger (high thr), 10=easy (low thr)
-  const base = state.noiseFloor || 0.01;
-  const mult = 1 + (10 - state.sensitivity) * 0.6; // 1.0 → 6.4
-  return Math.max(base * mult * 2.5, 0.015);
+// Called when a peak arrives while PAUSED
+function resumeFromPause(now) {
+  const pauseDuration = now - lastPeakTime;
+  if (pauseDuration < RESUME_GRACE && savedT > 0) {
+    // Short pause → trust old period, jump straight into TRACKING
+    estimatedT = savedT;
+    enterTracking();
+  } else {
+    // Long pause → re-learn from zero
+    estimatedT = 0;
+    enterLearning();
+    learnBuf.push(now);
+  }
+  currentRun = 0;
 }
 
-function updateBPM() {
-  const ri = state.recentIntervals;
-  if (ri.length < 2) { bpmEl.textContent = '—'; return; }
-  const avg = ri.reduce((a,b) => a+b, 0) / ri.length;
-  const bpm = Math.round(60000 / avg);
-  bpmEl.textContent = bpm;
+function lockTempo() {
+  // Compute median inter-peak gap from learning buffer, filtering DU-length gaps
+  const gaps = [];
+  for (let i = 1; i < learnBuf.length; i++) gaps.push(learnBuf[i] - learnBuf[i - 1]);
+  gaps.sort((a, b) => a - b);
+  const median = gaps[Math.floor(gaps.length / 2)];
+  // Only include gaps > 50% of median (removes spurious DU gaps during learning)
+  const validGaps = gaps.filter(g => g > median * 0.52);
+  estimatedT = validGaps.reduce((a, b) => a + b, 0) / validGaps.length;
+  enterTracking();
 }
 
-function updateStats() {
-  counterEl.textContent  = state.totalJumps;
-  duCountEl.textContent  = state.doubleUnder;
-  singleEl.textContent   = state.totalJumps - state.doubleUnder;
-  const pct = state.totalJumps > 0
-    ? Math.round((state.doubleUnder / state.totalJumps) * 100)
-    : 0;
-  $('duPct').textContent = state.totalJumps > 0 ? `${pct}% dei salti` : '— % dei salti';
+function updateTempo(gap) {
+  if (estimatedT === 0) estimatedT = gap;
+  else estimatedT = estimatedT * (1 - TEMPO_ALPHA) + gap * TEMPO_ALPHA;
 }
 
-function spawnRipple(isDU) {
-  const el = document.createElement('div');
-  el.className = 'ripple-ring' + (isDU ? ' du' : '');
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 500);
-}
+// ═══════════════════════════════════════════════════════════════
+//   PEAK HANDLER
+//   Called exactly once per confirmed audio transient
+// ═══════════════════════════════════════════════════════════════
+function onPeak(now) {
+  const gap  = now - lastPeakTime;
+  let   isDU = false;
 
-function flashCounter(isDU) {
-  counterEl.classList.remove('flash', 'flash-du');
-  void counterEl.offsetWidth; // reflow
-  counterEl.classList.add(isDU ? 'flash-du' : 'flash');
-  setTimeout(() => counterEl.classList.remove('flash', 'flash-du'), 120);
-}
+  switch (engineState) {
 
-function addHistory(isDU) {
-  state.history.push(isDU);
-  if (state.history.length > HIST_MAX) state.history.shift();
-  historyWrap.innerHTML = '';
-  state.history.forEach(du => {
-    const d = document.createElement('div');
-    d.className = 'h-dot active' + (du ? ' du' : '');
-    historyWrap.appendChild(d);
-  });
-}
+    case S.IDLE:
+      // First peak ever — start learning
+      enterLearning();
+      learnBuf.push(now);
+      break;
 
-function updateSessionTimer() {
-  if (!state.sessionStart) return;
-  const s = Math.floor((Date.now() - state.sessionStart) / 1000);
-  const mm = String(Math.floor(s/60)).padStart(2,'0');
-  const ss = String(s % 60).padStart(2,'0');
-  sessionTime.textContent = `Sessione: ${mm}:${ss}`;
-}
+    case S.LEARNING:
+      learnBuf.push(now);
+      if (learnBuf.length >= N_LEARN + 1) lockTempo();
+      break;
 
-// ═══════════════════════════════════════════════════
-//  CALIBRATION
-// ═══════════════════════════════════════════════════
-async function calibrate(analyserNode, buf) {
-  return new Promise(resolve => {
-    const DURATION = 2200; // ms
-    const start = performance.now();
-    let rmsSum = 0, samples = 0;
-
-    function tick() {
-      const now = performance.now();
-      const elapsed = now - start;
-      const pct = Math.min(elapsed / DURATION, 1);
-      calibBar.style.width = (pct * 100) + '%';
-      calibPct.textContent = Math.round(pct * 100) + '%';
-
-      analyserNode.getByteTimeDomainData(buf);
-      rmsSum += computeRMS(buf);
-      samples++;
-
-      if (elapsed < DURATION) {
-        requestAnimationFrame(tick);
+    case S.TRACKING:
+      if (gap < estimatedT * DU_RATIO && gap >= REFRACTORY) {
+        //
+        //  DOUBLE UNDER
+        //
+        //  Two close peaks = two rope rotations in one jump.
+        //  We count the PAIR as one jump (totalJumps already incremented
+        //  for the first hit); here we mark the second hit as a DU.
+        //  We do NOT update estimatedT with this short gap — it would
+        //  corrupt the period model. We also do NOT re-set lastPeakTime
+        //  to this hit; the NEXT normal-gap peak will reference the
+        //  FIRST hit of the DU pair, giving a gap ≈ T (or slightly >T
+        //  because the jumper was in the air longer). The EMA then
+        //  naturally absorbs the small drift.
+        //
+        isDU = true;
+        duJumps++;
+        // Update lastPeakTime so the NEXT peak gap is measured from here
+        // (not from the first DU hit, which would give gap ≈ T+halfDU)
+        lastPeakTime = now;
+        flashCounter(true);
+        spawnRipple(true);
+        addHistoryDot(true);
+        updateStats();
+        // Return early — we don't increment totalJumps for the second hit
+        return;
       } else {
-        state.noiseFloor = rmsSum / samples;
-        state.calibrated = true;
-        resolve();
+        // Normal jump: update period estimate
+        updateTempo(gap);
       }
+      break;
+
+    case S.PAUSED:
+      resumeFromPause(now);
+      break;
+  }
+
+  // Confirmed single jump
+  totalJumps++;
+  currentRun++;
+  lastPeakTime = now;
+
+  flashCounter(false);
+  spawnRipple(false);
+  addHistoryDot(false);
+  updateStats();
+  updateBPM();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   PAUSE WATCHDOG  (called every animation frame)
+// ═══════════════════════════════════════════════════════════════
+function checkPauseTimeout(now) {
+  if (engineState !== S.TRACKING && engineState !== S.LEARNING) return;
+  if (lastPeakTime === 0) return;
+
+  const elapsed = now - lastPeakTime;
+  const limit   = engineState === S.TRACKING
+    ? Math.min(Math.max(estimatedT * PAUSE_MULT, PAUSE_ABS), 5000)
+    : PAUSE_ABS;
+
+  if (elapsed > limit) enterPaused(now);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   PREDICTION WINDOW  (for ribbon visualisation)
+// ═══════════════════════════════════════════════════════════════
+function updateWindowViz(now) {
+  if (engineState !== S.TRACKING || estimatedT === 0 || lastPeakTime === 0) {
+    ribbonWindow.style.opacity = '0';
+    thrLow.style.opacity = '0';
+    return;
+  }
+
+  // progress: 0 = just jumped, 1 = exactly on time, >1 = late
+  const progress = (now - lastPeakTime) / estimatedT;
+  const inWindow = progress >= (1 - W_FACTOR) && progress <= (1 + W_FACTOR);
+
+  // Map the window onto the ribbon track as a fraction [0,1]
+  const wStart = Math.max(0, Math.min(1, progress - W_FACTOR));
+  const wEnd   = Math.max(0, Math.min(1, progress + W_FACTOR));
+  ribbonWindow.style.left    = (wStart * 100) + '%';
+  ribbonWindow.style.width   = ((wEnd - wStart) * 100) + '%';
+  ribbonWindow.style.opacity = inWindow ? '1' : '0.4';
+
+  // Low threshold marker (visible inside window)
+  const tLow = baseThreshold() * THR_WIN_MULT;
+  thrLow.style.left    = Math.min(tLow * RIBBON_SCALE * 100, 100) + '%';
+  thrLow.style.opacity = inWindow ? '1' : '0.3';
+}
+
+function isInWindow(now) {
+  if (engineState !== S.TRACKING || estimatedT === 0 || lastPeakTime === 0) return false;
+  const progress = (now - lastPeakTime) / estimatedT;
+  return progress >= (1 - W_FACTOR) && progress <= (1 + W_FACTOR);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   MAIN AUDIO LOOP
+// ═══════════════════════════════════════════════════════════════
+function audioLoop() {
+  if (!isListening) return;
+  analyser.getByteTimeDomainData(dataArray);
+
+  const now  = performance.now();
+  const peak = computePeak(dataArray);
+  const lvl  = Math.min(peak * RIBBON_SCALE, 1);
+
+  // Effective threshold: lower inside prediction window
+  const thr    = baseThreshold();
+  const effThr = isInWindow(now) ? thr * THR_WIN_MULT : thr;
+
+  // Update ribbon
+  ribbonLevel.style.width = (lvl * 100) + '%';
+  thrNormal.style.left    = Math.min(thr * RIBBON_SCALE * 100, 100) + '%';
+  updateWindowViz(now);
+  checkPauseTimeout(now);
+
+  // Hysteresis: must fall below 52% of effThr before re-arming
+  if (lvl < effThr * 0.52) peakArmed = true;
+
+  if (peakArmed && lvl >= effThr) {
+    const gap = now - lastPeakTime;
+    if (gap >= REFRACTORY) {
+      peakArmed = false;
+      onPeak(now);
+    }
+  }
+
+  rafHandle = requestAnimationFrame(audioLoop);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   CALIBRATION
+// ═══════════════════════════════════════════════════════════════
+async function calibrate() {
+  const DURATION = 2300;
+  const start    = performance.now();
+  let rmsSum = 0, samples = 0;
+
+  await new Promise(resolve => {
+    function tick() {
+      const elapsed = performance.now() - start;
+      const pct     = Math.min(elapsed / DURATION, 1);
+      calibBar.style.width  = (pct * 100) + '%';
+      calibPct.textContent  = Math.round(pct * 100) + '%';
+      analyser.getByteTimeDomainData(dataArray);
+      rmsSum += computeRMS(dataArray);
+      samples++;
+      elapsed < DURATION ? requestAnimationFrame(tick) : resolve();
     }
     requestAnimationFrame(tick);
   });
+
+  noiseFloor = rmsSum / samples;
 }
 
-// ═══════════════════════════════════════════════════
-//  PEAK DETECTION LOOP
-// ═══════════════════════════════════════════════════
-let peakArmed = false; // must fall below threshold before next peak counts
-
-function processPeak() {
-  const now = performance.now();
-  const timeSinceLast = now - state.lastPeakTime;
-  if (timeSinceLast < PEAK_REFRACTORY) return;
-
-  const gap = timeSinceLast;
-  const isDU = (gap < DU_MAX_GAP) && (state.totalJumps > 0);
-
-  state.totalJumps++;
-  if (isDU) state.doubleUnder++;
-
-  // BPM
-  state.recentIntervals.push(gap);
-  if (state.recentIntervals.length > 12) state.recentIntervals.shift();
-
-  state.lastPeakTime = now;
-
-  updateStats();
-  updateBPM();
-  flashCounter(isDU);
-  spawnRipple(isDU);
-  addHistory(isDU);
-}
-
-function audioLoop() {
-  if (!state.running) return;
-  analyser.getByteTimeDomainData(dataArray);
-
-  const rms  = computeRMS(dataArray);
-  const peak = computePeak(dataArray);
-  const level = Math.min(peak * 1.6, 1);
-  const thr   = getThreshold();
-
-  // Level bar
-  const pct = Math.round(level * 100);
-  levelFill.style.width = pct + '%';
-  levelPct.textContent  = pct + '%';
-
-  // Threshold marker
-  const thrPct = Math.min(thr * 1.6 * 100, 100);
-  threshLine.style.left = thrPct + '%';
-
-  // Hysteresis: arm when below, fire when above
-  if (level < thr * 0.55) {
-    peakArmed = true;
-  }
-  if (peakArmed && level >= thr) {
-    peakArmed = false;
-    processPeak();
-  }
-
-  animFrame = requestAnimationFrame(audioLoop);
-}
-
-// ═══════════════════════════════════════════════════
-//  START / STOP
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//   START / STOP
+// ═══════════════════════════════════════════════════════════════
 async function startListening() {
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }, video: false });
-  } catch(e) {
-    alert('Impossibile accedere al microfono: ' + e.message);
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+  } catch (e) {
+    alert('Impossibile accedere al microfono:\n' + e.message);
     return;
   }
 
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 1024;
-  analyser.smoothingTimeConstant = 0.2;
-
-  const src = audioCtx.createMediaStreamSource(stream);
-  src.connect(analyser);
-
+  analyser.smoothingTimeConstant = 0.15;
+  audioCtx.createMediaStreamSource(stream).connect(analyser);
   dataArray = new Uint8Array(analyser.fftSize);
 
-  // Calibration
-  statusPill.className = 'status-pill calib';
-  statusText.textContent = 'CALIBRAZIONE';
+  badge('state-learning', 'CALIBRAZIONE');
   calibOverlay.classList.add('visible');
-
-  await calibrate(analyser, dataArray);
-
+  await calibrate();
   calibOverlay.classList.remove('visible');
-  state.running = true;
-  state.sessionStart = Date.now();
 
-  setInterval(updateSessionTimer, 1000);
+  engineState  = S.IDLE;
+  isListening  = true;
+  sessionStart = Date.now();
+  peakArmed    = false;
+  lastPeakTime = 0;
 
-  statusPill.className = 'status-pill active';
-  statusText.textContent = 'IN ASCOLTO';
+  badge('state-idle', 'IN ASCOLTO');
   startBtn.textContent = 'Ferma';
   startBtn.classList.add('active');
 
-  peakArmed = false;
+  timerHandle = setInterval(updateSessionTimer, 1000);
   audioLoop();
 }
 
 function stopListening() {
-  state.running = false;
-  cancelAnimationFrame(animFrame);
+  isListening = false;
+  cancelAnimationFrame(rafHandle);
+  clearInterval(timerHandle);
 
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  if (stream)   { stream.getTracks().forEach(t => t.stop()); stream = null; }
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
 
-  statusPill.className = 'status-pill';
-  statusText.textContent = 'FERMO';
+  // Close open run
+  if (currentRun > 0 && engineState !== S.PAUSED) enterPaused(performance.now());
+
+  engineState = S.IDLE;
+  badge('state-idle', 'FERMO');
   startBtn.textContent = 'Riprendi';
   startBtn.classList.remove('active');
-
-  levelFill.style.width = '0%';
-  levelPct.textContent  = '0%';
+  ribbonLevel.style.width = '0%';
+  ribbonWindow.style.opacity = '0';
+  thrLow.style.opacity = '0';
 }
 
 function resetAll() {
-  Object.assign(state, {
-    totalJumps: 0, doubleUnder: 0,
-    lastPeakTime: 0, lastLastPeakTime: 0,
-    recentIntervals: [], history: [],
-    sessionStart: state.running ? Date.now() : null,
-  });
+  stopListening();
+  totalJumps = 0; duJumps = 0;
+  strikesDone = 0; bestRun = 0; currentRun = 0;
+  estimatedT = 0; lastPeakTime = 0; savedT = 0;
+  learnBuf = []; history = [];
+  engineState = S.IDLE;
+  badge('state-idle', 'PRONTO');
+  sessionStart = null;
+  sessionTime.textContent  = 'Sessione: 00:00';
+  ribbonInfo.textContent   = '—';
+  runBarWrap.style.display = 'none';
+  historyWrap.innerHTML    = '';
+  initHistoryDots();
   updateStats();
   bpmEl.textContent = '—';
-  historyWrap.innerHTML = '';
-  sessionTime.textContent = 'Sessione: 00:00';
+  startBtn.textContent = 'Inizia';
+  startBtn.classList.remove('active');
 }
 
-// ═══════════════════════════════════════════════════
-//  EVENTS
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//   UI HELPERS
+// ═══════════════════════════════════════════════════════════════
+function badge(cls, label) {
+  engineBadge.className    = 'engine-badge ' + cls;
+  engineLabel.textContent  = label;
+}
+
+function flashCounter(isDU) {
+  counterEl.classList.remove('flash', 'flash-du');
+  void counterEl.offsetWidth;
+  counterEl.classList.add(isDU ? 'flash-du' : 'flash');
+  setTimeout(() => counterEl.classList.remove('flash', 'flash-du'), 100);
+}
+
+function spawnRipple(isDU) {
+  const el = document.createElement('div');
+  el.className = 'ripple-ring' + (isDU ? ' du' : '');
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 550);
+}
+
+function addHistoryDot(isDU) {
+  history.push({ du: isDU, sep: false });
+  if (history.length > HIST_MAX) history.shift();
+  renderHistory();
+}
+
+function addSeparator() {
+  if (history.length && !history[history.length - 1].sep) {
+    history.push({ du: false, sep: true });
+    if (history.length > HIST_MAX) history.shift();
+    renderHistory();
+  }
+}
+
+function renderHistory() {
+  historyWrap.innerHTML = '';
+  const ghosts = Math.max(0, HIST_MAX - history.length);
+  for (let i = 0; i < ghosts; i++) {
+    const d = document.createElement('div'); d.className = 'h-dot';
+    historyWrap.appendChild(d);
+  }
+  history.forEach(h => {
+    const d = document.createElement('div');
+    d.className = h.sep ? 'h-dot run-sep' : ('h-dot active' + (h.du ? ' du' : ''));
+    historyWrap.appendChild(d);
+  });
+}
+
+function initHistoryDots() {
+  historyWrap.innerHTML = '';
+  for (let i = 0; i < HIST_MAX; i++) {
+    const d = document.createElement('div'); d.className = 'h-dot';
+    historyWrap.appendChild(d);
+  }
+}
+
+function updateStats() {
+  counterEl.textContent    = totalJumps;
+  duCountEl.textContent    = duJumps;
+  singleEl.textContent     = totalJumps - duJumps;
+  strikeEl.textContent     = strikesDone;
+  bestRunEl.textContent    = bestRun;
+  currentRunEl.textContent = currentRun;
+
+  const pct = totalJumps > 0 ? Math.round((duJumps / totalJumps) * 100) : 0;
+  duPctEl.textContent = totalJumps > 0 ? pct + '% dei salti' : '—';
+
+  if (currentRun > 0 && engineState === S.TRACKING) {
+    currentRunSub.textContent = 'in corso ▶';
+    if (bestRun > 0) {
+      runBarWrap.style.display = '';
+      const p = Math.min(currentRun / bestRun, 1);
+      runBarFill.style.width = (p * 100) + '%';
+      runBarPct.textContent   = currentRun >= bestRun ? '🏆 nuovo record!' : Math.round(p * 100) + '% del best';
+    }
+  } else if (engineState === S.PAUSED) {
+    currentRunSub.textContent = 'run chiuso';
+  } else {
+    currentRunSub.textContent = '—';
+  }
+}
+
+function updateBPM() {
+  if (estimatedT > 0) {
+    bpmEl.textContent      = Math.round(60000 / estimatedT);
+    ribbonInfo.textContent = 'T = ' + Math.round(estimatedT) + ' ms';
+  }
+}
+
+function updateSessionTimer() {
+  if (!sessionStart) return;
+  const s  = Math.floor((Date.now() - sessionStart) / 1000);
+  const mm = String(Math.floor(s / 60)).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  sessionTime.textContent = 'Sessione: ' + mm + ':' + ss;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   EVENTS
+// ═══════════════════════════════════════════════════════════════
 startBtn.addEventListener('click', () => {
-  if (!state.running) startListening();
+  if (!isListening) startListening();
   else stopListening();
 });
 
-resetBtn.addEventListener('click', resetAll);
+$('resetBtn').addEventListener('click', resetAll);
 
-sensSlider.addEventListener('input', () => {
-  state.sensitivity = +sensSlider.value;
-  sensVal.textContent = state.sensitivity;
-  // Update threshold marker immediately
-  if (state.calibrated) {
-    const thr    = getThreshold();
-    const thrPct = Math.min(thr * 1.6 * 100, 100);
-    threshLine.style.left = thrPct + '%';
-  }
+$('sensSlider').addEventListener('input', function () {
+  sensitivity = +this.value;
+  $('sensVal').textContent = sensitivity;
+  thrNormal.style.left = Math.min(baseThreshold() * RIBBON_SCALE * 100, 100) + '%';
 });
 
-// Init history dots
-for (let i = 0; i < HIST_MAX; i++) {
-  const d = document.createElement('div');
-  d.className = 'h-dot';
-  historyWrap.appendChild(d);
-}
+// Boot
+initHistoryDots();
 </script>
 </body>
 </html>
