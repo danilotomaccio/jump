@@ -215,6 +215,15 @@
     font-family: 'JetBrains Mono', monospace; font-size: .66rem;
     color: var(--muted); min-width: 80px;
   }
+  .band-btn {
+    font-family: 'JetBrains Mono', monospace; font-size: .58rem;
+    font-weight: 700; padding: 2px 7px; border-radius: 3px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+    transition: all .12s; letter-spacing: .05em;
+  }
+  .band-btn:hover { border-color: var(--muted); }
+  .band-btn.muted { background: var(--accent2); color: #fff; border-color: var(--accent2); }
+  .band-btn.soloed { background: var(--du-color); color: #0a0a0b; border-color: var(--du-color); }
 
   /* Panels / Columns */
   .columns {
@@ -666,6 +675,12 @@ const MATCH_TOLERANCE_MS = 80;
 let hpOn = false, lpOn = false, bpOn = false;
 let filteredChannelData = null;  // null = showing original
 
+// Band mute/solo state
+let bandMuted = DEFAULT_BANDS.map(() => false);
+let bandSoloed = -1;  // -1 = no solo, 0-4 = soloed band index
+let bandGainNodes = [];    // GainNode per band (created during playback)
+let bandFilterNodes = [];  // BiquadFilterNode per band
+
 function getDisplayData() {
   return filteredChannelData || audioBuffer.getChannelData(0);
 }
@@ -771,13 +786,43 @@ function buildTuningPanel() {
 function buildBandPanel() {
   const container = $('bandRows');
   container.innerHTML = '';
-  for (const b of DEFAULT_BANDS) {
+  DEFAULT_BANDS.forEach((b, i) => {
     const row = document.createElement('div');
     row.className = 'band-row';
     row.innerHTML = '<div class="band-swatch" style="background:' + b.color + '"></div>' +
-      '<span class="band-label">' + b.label + ' Hz</span>';
+      '<span class="band-label">' + b.label + ' Hz</span>' +
+      '<button class="band-btn" data-band="' + i + '" data-action="mute">M</button>' +
+      '<button class="band-btn" data-band="' + i + '" data-action="solo">S</button>';
     container.appendChild(row);
-  }
+  });
+
+  // Mute/Solo event delegation
+  container.addEventListener('click', e => {
+    const btn = e.target.closest('.band-btn');
+    if (!btn) return;
+    const idx = parseInt(btn.dataset.band);
+    const action = btn.dataset.action;
+
+    if (action === 'mute') {
+      bandMuted[idx] = !bandMuted[idx];
+      if (bandMuted[idx] && bandSoloed === idx) bandSoloed = -1;
+      btn.classList.toggle('muted', bandMuted[idx]);
+    } else if (action === 'solo') {
+      if (bandSoloed === idx) {
+        bandSoloed = -1;
+        btn.classList.remove('soloed');
+      } else {
+        bandSoloed = idx;
+        // Clear previous solo visual
+        container.querySelectorAll('[data-action="solo"]').forEach(b => b.classList.remove('soloed'));
+        btn.classList.add('soloed');
+        // Unsolo also unmutes the soloed band
+        bandMuted[idx] = false;
+        container.querySelectorAll('[data-action="mute"]')[idx]?.classList.remove('muted');
+      }
+    }
+    updateBandGains();
+  });
 }
 
 // ==================================================================
@@ -1218,23 +1263,91 @@ function buildFilterChain() {
   }
 }
 
+function buildBandFilterBank() {
+  bandFilterNodes = [];
+  bandGainNodes = [];
+  if (!audioCtx) return;
+
+  const anyBandControl = bandSoloed >= 0 || bandMuted.some(m => m);
+  if (!anyBandControl) return;
+
+  for (let i = 0; i < DEFAULT_BANDS.length; i++) {
+    const band = DEFAULT_BANDS[i];
+    const center = Math.sqrt(band.lo * band.hi) || (band.lo + band.hi) / 2;
+    const bw = band.hi - band.lo;
+    // Q = center / bandwidth (approximate)
+    const q = center > 0 ? center / bw : 0.5;
+
+    const bp = audioCtx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = Math.max(20, center);
+    bp.Q.value = Math.max(0.1, q);
+
+    const gain = audioCtx.createGain();
+    // Apply mute/solo state
+    if (bandSoloed >= 0) {
+      gain.gain.value = (i === bandSoloed) ? 1 : 0;
+    } else {
+      gain.gain.value = bandMuted[i] ? 0 : 1;
+    }
+
+    bandFilterNodes.push(bp);
+    bandGainNodes.push(gain);
+  }
+}
+
+function updateBandGains() {
+  const needsBank = bandSoloed >= 0 || bandMuted.some(m => m);
+  const hasBank = bandGainNodes.length > 0;
+
+  // If bank presence needs to change, rebuild entire graph
+  if (needsBank !== hasBank && playState === 'playing' && sourceNode && audioCtx) {
+    buildBandFilterBank();
+    connectAudioGraph();
+    return;
+  }
+
+  for (let i = 0; i < bandGainNodes.length; i++) {
+    let val;
+    if (bandSoloed >= 0) {
+      val = (i === bandSoloed) ? 1 : 0;
+    } else {
+      val = bandMuted[i] ? 0 : 1;
+    }
+    bandGainNodes[i].gain.setTargetAtTime(val, audioCtx ? audioCtx.currentTime : 0, 0.02);
+  }
+}
+
 function connectAudioGraph() {
   if (!sourceNode || !analyser || !audioCtx) return;
   // Disconnect everything first
   sourceNode.disconnect();
   filterNodes.forEach(n => n.disconnect());
+  bandFilterNodes.forEach(n => n.disconnect());
+  bandGainNodes.forEach(n => n.disconnect());
   analyser.disconnect();
 
-  const useFilters = filterNodes.length > 0;
-  if (useFilters) {
+  // Step 1: source → [HP/LP/BP filters] → preOut
+  let preOut = sourceNode;
+  if (filterNodes.length > 0) {
     sourceNode.connect(filterNodes[0]);
     for (let i = 0; i < filterNodes.length - 1; i++) {
       filterNodes[i].connect(filterNodes[i + 1]);
     }
-    filterNodes[filterNodes.length - 1].connect(analyser);
-  } else {
-    sourceNode.connect(analyser);
+    preOut = filterNodes[filterNodes.length - 1];
   }
+
+  // Step 2: preOut → [band filter bank] → analyser
+  if (bandFilterNodes.length > 0) {
+    for (let i = 0; i < bandFilterNodes.length; i++) {
+      preOut.connect(bandFilterNodes[i]);
+      bandFilterNodes[i].connect(bandGainNodes[i]);
+      bandGainNodes[i].connect(analyser);
+    }
+  } else {
+    preOut.connect(analyser);
+  }
+
   analyser.connect(audioCtx.destination);
 }
 
@@ -1275,11 +1388,11 @@ function _startSource(offset, endTime) {
   freqArray = new Uint8Array(analyser.frequencyBinCount);
 
   buildFilterChain();
+  buildBandFilterBank();
 
   sourceNode = audioCtx.createBufferSource();
   sourceNode.buffer = audioBuffer;
   sourceNode.playbackRate.value = playbackRate;
-
   connectAudioGraph();
 
   playOffset = offset;
@@ -1348,6 +1461,7 @@ function playSnippet(centerTime) {
   freqArray = new Uint8Array(analyser.frequencyBinCount);
 
   buildFilterChain();
+  buildBandFilterBank();
   sourceNode = audioCtx.createBufferSource();
   sourceNode.buffer = audioBuffer;
   sourceNode.playbackRate.value = playbackRate;
@@ -1689,6 +1803,10 @@ function buildExportData() {
       lp: { on: lpOn, freq: parseFloat(lpFreq.value), Q: parseFloat(lpQ.value) },
       bp: { on: bpOn, freq: parseFloat(bpFreq.value), Q: parseFloat(bpQ.value) }
     },
+    bandControls: {
+      muted: DEFAULT_BANDS.map((b, i) => ({ label: b.label, muted: bandMuted[i] })),
+      soloed: bandSoloed >= 0 ? { index: bandSoloed, label: DEFAULT_BANDS[bandSoloed].label } : null
+    },
     filteredVisualsActive: filteredChannelData !== null,
     groundTruth: groundTruth.map(t => parseFloat(t.toFixed(4))),
     detections: detections.map(d => ({
@@ -1983,6 +2101,7 @@ function toggleFilter(btn, state) {
   // Rebuild audio graph if currently playing
   if (playState === 'playing' && sourceNode && analyser && audioCtx) {
     buildFilterChain();
+    buildBandFilterBank();
     connectAudioGraph();
   }
 }
