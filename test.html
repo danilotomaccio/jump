@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SKIP — Test Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@300;400;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0a0a0b;
+    --surface:   #111114;
+    --border:    #1e1e24;
+    --accent:    #c8f135;
+    --accent2:   #f13564;
+    --text:      #e8e8ec;
+    --muted:     #4a4a56;
+    --muted2:    #2a2a32;
+    --du-color:  #f9a825;
+    --str-color: #38d9f5;
+    --gt-color:  #4a90d9;
+    --rej-color: #f13564;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Barlow Condensed', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .app {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 20px 24px 40px;
+  }
+
+  /* ─── Header ─── */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding-bottom: 16px; border-bottom: 1px solid var(--border);
+    margin-bottom: 20px; flex-wrap: wrap; gap: 10px;
+  }
+  .logo { font-size: 1.6rem; font-weight: 900; letter-spacing: .2em; color: var(--accent); }
+  .logo-sub { font-size: .82rem; font-weight: 400; letter-spacing: .1em; color: var(--muted); margin-left: 12px; }
+
+  /* ─── Drop zone ─── */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    margin-bottom: 20px;
+  }
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: var(--accent);
+    background: rgba(200,241,53,.04);
+  }
+  .drop-zone-text { font-size: 1.1rem; color: var(--muted); letter-spacing: .1em; }
+  .drop-zone-text strong { color: var(--text); }
+  .drop-zone input { display: none; }
+
+  /* ─── Waveform ─── */
+  .wave-wrap {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 16px;
+    cursor: crosshair;
+  }
+  .wave-wrap canvas { display: block; width: 100%; height: 160px; }
+  .wave-overlay { display: block; width: 100%; height: 160px; }
+  .playhead {
+    position: absolute; top: 0; bottom: 0; width: 2px;
+    background: var(--accent); pointer-events: none;
+    left: 0; transition: left 0.03s linear;
+  }
+  .wave-time {
+    position: absolute; bottom: 4px; right: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .72rem; color: var(--muted);
+  }
+
+  /* ─── Controls ─── */
+  .controls {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    margin-bottom: 16px;
+  }
+  .btn {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: .95rem; font-weight: 700;
+    letter-spacing: .16em; text-transform: uppercase;
+    border: none; border-radius: 8px;
+    padding: 10px 22px; cursor: pointer;
+    transition: transform .1s, background .2s;
+  }
+  .btn:active { transform: scale(.96); }
+  .btn-play { background: var(--accent); color: #0a0a0b; }
+  .btn-play.playing { background: var(--accent2); color: #fff; }
+  .btn-secondary {
+    background: var(--surface); color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { border-color: var(--muted); color: var(--text); }
+  .speed-group {
+    display: flex; gap: 4px; margin-left: 8px;
+  }
+  .speed-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .75rem; padding: 6px 12px;
+    background: var(--surface); color: var(--muted);
+    border: 1px solid var(--border); border-radius: 6px;
+    cursor: pointer; transition: all .15s;
+  }
+  .speed-btn.active { background: var(--accent); color: #0a0a0b; border-color: var(--accent); }
+  .file-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .75rem; color: var(--muted); margin-left: auto;
+  }
+
+  /* ─── Two columns: Stats + Tuning ─── */
+  .columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  @media (max-width: 700px) { .columns { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .panel-title {
+    font-size: .72rem; font-weight: 700;
+    letter-spacing: .28em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 12px;
+  }
+
+  /* Stats */
+  .stat-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+  .stat-item { display: flex; flex-direction: column; gap: 2px; }
+  .stat-item .label {
+    font-size: .64rem; font-weight: 600;
+    letter-spacing: .24em; text-transform: uppercase; color: var(--muted);
+  }
+  .stat-item .value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.5rem; font-weight: 700;
+  }
+  .stat-item.accent .value { color: var(--accent); }
+  .stat-item.du .value { color: var(--du-color); }
+  .stat-item.bpm .value { color: var(--accent2); }
+  .stat-item.rej .value { color: var(--rej-color); }
+
+  /* Metrics */
+  .metrics-grid {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+  }
+  .metric-item .label {
+    font-size: .62rem; font-weight: 600;
+    letter-spacing: .2em; text-transform: uppercase; color: var(--muted);
+  }
+  .metric-item .value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.2rem; font-weight: 700; color: var(--str-color);
+  }
+
+  /* Tuning sliders */
+  .tuning-row {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 8px;
+  }
+  .tuning-row .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .68rem; color: var(--muted);
+    min-width: 130px; white-space: nowrap;
+  }
+  .tuning-row input[type=range] {
+    -webkit-appearance: none; flex: 1; height: 3px;
+    background: var(--muted2); border-radius: 99px;
+    outline: none; cursor: pointer;
+  }
+  .tuning-row input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--bg);
+  }
+  .tuning-row .val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .72rem; color: var(--accent);
+    min-width: 48px; text-align: right;
+  }
+
+  /* Legend */
+  .legend {
+    display: flex; gap: 18px; flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 6px;
+    font-size: .72rem; color: var(--muted); letter-spacing: .08em;
+  }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  }
+  .legend-dot.jump { background: var(--accent); }
+  .legend-dot.du { background: var(--du-color); }
+  .legend-dot.gt { background: var(--gt-color); }
+  .legend-dot.rej { background: var(--rej-color); }
+
+  /* Event log */
+  .log-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .log-entry {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .68rem; color: var(--muted);
+    padding: 2px 0; border-bottom: 1px solid var(--border);
+  }
+  .log-entry .time { color: var(--text); }
+  .log-entry.jump .type { color: var(--accent); }
+  .log-entry.du .type { color: var(--du-color); }
+  .log-entry.rejected .type { color: var(--rej-color); }
+  .log-entry.gt .type { color: var(--gt-color); }
+
+  /* Instructions */
+  .instructions {
+    font-size: .78rem; color: var(--muted); line-height: 1.7;
+    margin-top: 16px; padding: 12px 16px;
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  .instructions kbd {
+    background: var(--muted2); padding: 2px 6px; border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace; font-size: .68rem;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <div><span class="logo">SKIP</span><span class="logo-sub">Test Lab</span></div>
+    <a href="index.html" class="btn btn-secondary" style="font-size:.78rem;padding:8px 16px">← App principale</a>
+  </header>
+
+  <!-- Drop zone -->
+  <div class="drop-zone" id="dropZone">
+    <div class="drop-zone-text">
+      <strong>Trascina un file audio</strong> qui oppure clicca per selezionare<br>
+      <span style="font-size:.8rem">.m4a · .wav · .mp3 · .ogg</span>
+    </div>
+    <input type="file" id="fileInput" accept="audio/*">
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot jump"></div> Salto rilevato</div>
+    <div class="legend-item"><div class="legend-dot du"></div> Double Under</div>
+    <div class="legend-item"><div class="legend-dot rej"></div> Rifiutato</div>
+    <div class="legend-item"><div class="legend-dot gt"></div> Ground truth (click)</div>
+  </div>
+
+  <!-- Waveform -->
+  <div class="wave-wrap" id="waveWrap" style="display:none">
+    <canvas id="waveCanvas"></canvas>
+    <canvas id="markerCanvas" class="wave-overlay" style="position:absolute;top:0;left:0"></canvas>
+    <div class="playhead" id="playhead"></div>
+    <div class="wave-time" id="waveTime">0:00 / 0:00</div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls" id="controlsBar" style="display:none">
+    <button class="btn btn-play" id="playBtn">▶ Play</button>
+    <button class="btn btn-secondary" id="reprocessBtn">⟳ Riprocessa</button>
+    <button class="btn btn-secondary" id="clearGtBtn">✕ Pulisci GT</button>
+    <div class="speed-group">
+      <button class="speed-btn active" data-speed="1">1×</button>
+      <button class="speed-btn" data-speed="2">2×</button>
+      <button class="speed-btn" data-speed="4">4×</button>
+    </div>
+    <span class="file-name" id="fileName"></span>
+  </div>
+
+  <!-- Columns -->
+  <div class="columns" id="columnsArea" style="display:none">
+    <!-- Stats panel -->
+    <div class="panel">
+      <div class="panel-title">Risultati rilevamento</div>
+      <div class="stat-grid">
+        <div class="stat-item accent"><div class="label">Salti</div><div class="value" id="stTotal">0</div></div>
+        <div class="stat-item du"><div class="label">Double Under</div><div class="value" id="stDU">0</div></div>
+        <div class="stat-item bpm"><div class="label">BPM medio</div><div class="value" id="stBPM">—</div></div>
+        <div class="stat-item rej"><div class="label">Rifiutati</div><div class="value" id="stRej">0</div></div>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-item"><div class="label">Precision</div><div class="value" id="mPrec">—</div></div>
+        <div class="metric-item"><div class="label">Recall</div><div class="value" id="mRec">—</div></div>
+        <div class="metric-item"><div class="label">F1 Score</div><div class="value" id="mF1">—</div></div>
+      </div>
+    </div>
+
+    <!-- Tuning panel -->
+    <div class="panel">
+      <div class="panel-title">Tuning parametri</div>
+      <div id="tuningSliders"></div>
+    </div>
+  </div>
+
+  <!-- Event log -->
+  <div class="panel" id="logPanel" style="display:none">
+    <div class="panel-title">Event Log</div>
+    <div class="log-wrap" id="logWrap"></div>
+  </div>
+
+  <div class="instructions">
+    <strong>Come usare:</strong><br>
+    1. Carica un file audio (drag-and-drop o click)<br>
+    2. Premi <kbd>▶ Play</kbd> per riprodurre — i salti vengono rilevati in tempo reale<br>
+    3. <kbd>Click sulla waveform</kbd> per piazzare marker di ground truth (salti reali)<br>
+    4. Usa gli slider nel pannello Tuning per regolare i parametri e premi <kbd>⟳ Riprocessa</kbd><br>
+    5. Precision/Recall/F1 confrontano i rilevamenti con le annotazioni (tolleranza ±80ms)
+  </div>
+
+</div>
+
+<script type="module">
+import { JumpEngine, S, DEFAULTS, computeRMS, computeSpectralFlatness, computeSpectralCentroid } from './engine.js';
+
+// ═══════════════════════════════════════════════════════════════
+//   STATE
+// ═══════════════════════════════════════════════════════════════
+let engine = new JumpEngine();
+let audioCtx = null;
+let analyser = null;
+let sourceNode = null;
+let audioBuffer = null;
+let dataArray = null;
+let freqArray = null;
+
+let isPlaying = false;
+let playStartTime = 0;      // audioCtx.currentTime when playback started
+let playOffset = 0;          // offset into the buffer (for seek)
+let playbackRate = 1;
+let rafHandle = null;
+
+// Detected events: { time (seconds into audio), type, sigScore, ... }
+let detections = [];
+let rejections = [];
+let groundTruth = [];        // seconds into audio, set by clicking waveform
+let calibrationDone = false;
+
+const MATCH_TOLERANCE_MS = 80;
+
+// ═══════════════════════════════════════════════════════════════
+//   DOM
+// ═══════════════════════════════════════════════════════════════
+const $ = id => document.getElementById(id);
+const dropZone      = $('dropZone');
+const fileInput     = $('fileInput');
+const waveWrap      = $('waveWrap');
+const waveCanvas    = $('waveCanvas');
+const markerCanvas  = $('markerCanvas');
+const playhead      = $('playhead');
+const waveTime      = $('waveTime');
+const playBtn       = $('playBtn');
+const reprocessBtn  = $('reprocessBtn');
+const clearGtBtn    = $('clearGtBtn');
+const controlsBar   = $('controlsBar');
+const columnsArea   = $('columnsArea');
+const logPanel      = $('logPanel');
+const logWrap       = $('logWrap');
+const fileNameEl    = $('fileName');
+
+// Stats
+const stTotal = $('stTotal');
+const stDU    = $('stDU');
+const stBPM   = $('stBPM');
+const stRej   = $('stRej');
+const mPrec   = $('mPrec');
+const mRec    = $('mRec');
+const mF1     = $('mF1');
+
+// ═══════════════════════════════════════════════════════════════
+//   TUNING PANEL
+// ═══════════════════════════════════════════════════════════════
+const TUNING_PARAMS = [
+  { key: 'SIG_MIN_SCORE',    label: 'Min Sig Score',    min: 0,    max: 1,     step: 0.01 },
+  { key: 'SIG_WEIGHT_FLAT',  label: 'Weight Flatness',  min: 0,    max: 1,     step: 0.05 },
+  { key: 'SIG_WEIGHT_CREST', label: 'Weight Crest',     min: 0,    max: 1,     step: 0.05 },
+  { key: 'SIG_WEIGHT_CENT',  label: 'Weight Centroid',  min: 0,    max: 1,     step: 0.05 },
+  { key: 'CREST_ROPE_MIN',   label: 'Crest Min',        min: 1,    max: 8,     step: 0.5  },
+  { key: 'CREST_NORM_MAX',   label: 'Crest Norm Max',   min: 5,    max: 20,    step: 1    },
+  { key: 'CENT_ROPE_MIN_HZ', label: 'Centroid Min Hz',  min: 200,  max: 5000,  step: 100  },
+  { key: 'CENT_ROPE_MAX_HZ', label: 'Centroid Max Hz',  min: 3000, max: 15000, step: 500  },
+  { key: 'TEMPLATE_BLEND',   label: 'Template Blend',   min: 0,    max: 1,     step: 0.05 },
+  { key: 'REFRACTORY',       label: 'Refractory ms',    min: 50,   max: 300,   step: 10   },
+  { key: 'DU_RATIO',         label: 'DU Ratio',         min: 0.2,  max: 0.7,   step: 0.02 },
+];
+
+function buildTuningPanel() {
+  const container = $('tuningSliders');
+  container.innerHTML = '';
+  for (const p of TUNING_PARAMS) {
+    const val = engine.cfg[p.key];
+    const row = document.createElement('div');
+    row.className = 'tuning-row';
+    row.innerHTML = `
+      <span class="label">${p.label}</span>
+      <input type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${val}" data-key="${p.key}">
+      <span class="val" id="tv_${p.key}">${val}</span>
+    `;
+    const slider = row.querySelector('input');
+    const valEl = row.querySelector('.val');
+    slider.addEventListener('input', () => {
+      const v = parseFloat(slider.value);
+      engine.setCfg(p.key, v);
+      valEl.textContent = v % 1 === 0 ? v : v.toFixed(2);
+    });
+    container.appendChild(row);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   WAVEFORM DRAWING
+// ═══════════════════════════════════════════════════════════════
+function drawWaveform() {
+  if (!audioBuffer) return;
+  const canvas = waveCanvas;
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = 160 * dpr;
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = '160px';
+  markerCanvas.width = canvas.width;
+  markerCanvas.height = canvas.height;
+  markerCanvas.style.width = canvas.style.width;
+  markerCanvas.style.height = canvas.style.height;
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const w = rect.width;
+  const h = 160;
+  const data = audioBuffer.getChannelData(0);
+  const step = Math.ceil(data.length / w);
+
+  ctx.fillStyle = '#111114';
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.strokeStyle = '#2a2a3a';
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(0, h / 2);
+  ctx.lineTo(w, h / 2);
+  ctx.stroke();
+
+  ctx.fillStyle = '#4a4a56';
+  for (let x = 0; x < w; x++) {
+    const start = x * step;
+    let min = 1, max = -1;
+    for (let i = 0; i < step && start + i < data.length; i++) {
+      const v = data[start + i];
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    const yMin = (1 - max) * h / 2;
+    const yMax = (1 - min) * h / 2;
+    ctx.fillRect(x, yMin, 1, Math.max(1, yMax - yMin));
+  }
+}
+
+function drawMarkers() {
+  if (!audioBuffer) return;
+  const canvas = markerCanvas;
+  const dpr = window.devicePixelRatio || 1;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width / dpr;
+  const h = canvas.height / dpr;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.scale(dpr, dpr);
+
+  const dur = audioBuffer.duration;
+
+  // Ground truth markers (blue, from bottom)
+  ctx.fillStyle = 'rgba(74, 144, 217, 0.7)';
+  for (const t of groundTruth) {
+    const x = (t / dur) * w;
+    ctx.fillRect(x - 1, h * 0.6, 2, h * 0.4);
+  }
+
+  // Detected jumps (green, from top)
+  for (const d of detections) {
+    ctx.fillStyle = d.type === 'du' ? 'rgba(249, 168, 37, 0.8)' : 'rgba(200, 241, 53, 0.8)';
+    const x = (d.time / dur) * w;
+    ctx.fillRect(x - 1, 0, 2, h * 0.4);
+  }
+
+  // Rejected peaks (red, small from top)
+  ctx.fillStyle = 'rgba(241, 53, 100, 0.4)';
+  for (const r of rejections) {
+    const x = (r.time / dur) * w;
+    ctx.fillRect(x, 0, 1, h * 0.2);
+  }
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   FILE LOADING
+// ═══════════════════════════════════════════════════════════════
+async function loadFile(file) {
+  fileNameEl.textContent = file.name;
+  const arrayBuf = await file.arrayBuffer();
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  audioBuffer = await audioCtx.decodeAudioData(arrayBuf);
+
+  waveWrap.style.display = '';
+  controlsBar.style.display = '';
+  columnsArea.style.display = '';
+  logPanel.style.display = '';
+  dropZone.style.display = 'none';
+
+  drawWaveform();
+  buildTuningPanel();
+  updateTimeDisplay(0);
+
+  // Run calibration on first 2 seconds of audio
+  await calibrateFromBuffer();
+}
+
+async function calibrateFromBuffer() {
+  // Create offline analyser to measure first ~2s of audio for noise floor
+  const offCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const offAnalyser = offCtx.createAnalyser();
+  offAnalyser.fftSize = 1024;
+  offAnalyser.smoothingTimeConstant = 0.15;
+
+  // Create a short buffer source for calibration (first 0.5s - likely silence/ambient)
+  const calibDur = Math.min(0.5, audioBuffer.duration);
+  const calibBuffer = offCtx.createBuffer(
+    audioBuffer.numberOfChannels,
+    Math.floor(calibDur * audioBuffer.sampleRate),
+    audioBuffer.sampleRate
+  );
+  for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
+    const src = audioBuffer.getChannelData(ch);
+    const dst = calibBuffer.getChannelData(ch);
+    for (let i = 0; i < dst.length; i++) dst[i] = src[i];
+  }
+
+  const src = offCtx.createBufferSource();
+  src.buffer = calibBuffer;
+  src.connect(offAnalyser);
+  offAnalyser.connect(offCtx.destination);
+  src.start();
+
+  const td = new Uint8Array(offAnalyser.fftSize);
+  const fd = new Uint8Array(offAnalyser.frequencyBinCount);
+  let rmsSum = 0, flatSum = 0, centSum = 0, samples = 0;
+
+  await new Promise(resolve => {
+    function tick() {
+      if (offCtx.currentTime >= calibDur) { resolve(); return; }
+      offAnalyser.getByteTimeDomainData(td);
+      offAnalyser.getByteFrequencyData(fd);
+      rmsSum += computeRMS(td);
+      flatSum += computeSpectralFlatness(fd);
+      centSum += computeSpectralCentroid(fd, offCtx.sampleRate, offAnalyser.fftSize);
+      samples++;
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  });
+
+  if (samples > 0) {
+    engine.setCalibration(rmsSum / samples, flatSum / samples, centSum / samples);
+  }
+  offCtx.close();
+  calibrationDone = true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   PLAYBACK + DETECTION
+// ═══════════════════════════════════════════════════════════════
+function startPlayback(offset = 0) {
+  if (!audioBuffer || !audioCtx) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+
+  // Reset engine for fresh run
+  engine.reset();
+  if (calibrationDone) {
+    // Re-apply calibration
+    const cached = { nf: engine.noiseFloor, bf: engine.baselineFlatness, bc: engine.baselineCentroid };
+    engine.reset();
+    // calibration was set before, re-read from engine backup isn't possible after reset
+    // so we re-calibrate
+  }
+  detections = [];
+  rejections = [];
+  logWrap.innerHTML = '';
+
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 1024;
+  analyser.smoothingTimeConstant = 0.15;
+
+  sourceNode = audioCtx.createBufferSource();
+  sourceNode.buffer = audioBuffer;
+  sourceNode.playbackRate.value = playbackRate;
+  sourceNode.connect(analyser);
+  analyser.connect(audioCtx.destination);
+
+  dataArray = new Uint8Array(analyser.fftSize);
+  freqArray = new Uint8Array(analyser.frequencyBinCount);
+
+  playOffset = offset;
+  playStartTime = audioCtx.currentTime;
+  sourceNode.start(0, offset);
+  isPlaying = true;
+
+  // Re-calibrate from buffer (reuse stored values)
+  calibrateFromBuffer();
+
+  playBtn.textContent = '■ Stop';
+  playBtn.classList.add('playing');
+
+  sourceNode.onended = () => {
+    if (isPlaying) stopPlayback();
+  };
+
+  processLoop();
+}
+
+function stopPlayback() {
+  isPlaying = false;
+  cancelAnimationFrame(rafHandle);
+  if (sourceNode) { try { sourceNode.stop(); } catch(e) {} sourceNode = null; }
+  playBtn.textContent = '▶ Play';
+  playBtn.classList.remove('playing');
+  updateStats();
+  computeMetrics();
+  drawMarkers();
+}
+
+function getCurrentTime() {
+  if (!isPlaying) return playOffset;
+  return playOffset + (audioCtx.currentTime - playStartTime) * playbackRate;
+}
+
+function processLoop() {
+  if (!isPlaying) return;
+
+  analyser.getByteTimeDomainData(dataArray);
+  analyser.getByteFrequencyData(freqArray);
+
+  const audioTime = getCurrentTime();
+  const now = audioTime * 1000; // engine works in ms
+
+  const result = engine.processFrame(dataArray, freqArray, now, audioCtx.sampleRate, analyser.fftSize);
+
+  for (const evt of result.events) {
+    const timeSec = audioTime;
+    if (evt.type === 'jump' || evt.type === 'du') {
+      detections.push({ time: timeSec, type: evt.type, sigScore: evt.sigScore ?? 0 });
+      addLogEntry(timeSec, evt.type, evt.sigScore ?? 0);
+    } else if (evt.type === 'rejected') {
+      rejections.push({ time: timeSec, sigScore: evt.sigScore });
+      addLogEntry(timeSec, 'rejected', evt.sigScore);
+    }
+  }
+
+  // Update playhead
+  if (audioBuffer) {
+    const pct = Math.min(audioTime / audioBuffer.duration, 1);
+    playhead.style.left = (pct * 100) + '%';
+    updateTimeDisplay(audioTime);
+  }
+
+  // Update stats periodically
+  updateStats();
+  drawMarkers();
+
+  rafHandle = requestAnimationFrame(processLoop);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   REPROCESS — replay the file through the engine quickly
+// ═══════════════════════════════════════════════════════════════
+async function reprocess() {
+  if (isPlaying) stopPlayback();
+  if (!audioBuffer) return;
+
+  engine.reset();
+  detections = [];
+  rejections = [];
+  logWrap.innerHTML = '';
+
+  // Re-calibrate
+  await calibrateFromBuffer();
+
+  // Create an offline audio context for fast processing
+  const offCtx = new OfflineAudioContext(
+    audioBuffer.numberOfChannels,
+    audioBuffer.length,
+    audioBuffer.sampleRate
+  );
+  const offAnalyser = offCtx.createAnalyser();
+  offAnalyser.fftSize = 1024;
+  offAnalyser.smoothingTimeConstant = 0.15;
+
+  const src = offCtx.createBufferSource();
+  src.buffer = audioBuffer;
+  src.connect(offAnalyser);
+  offAnalyser.connect(offCtx.destination);
+  src.start();
+
+  // Use a ScriptProcessorNode to intercept frames
+  const processor = offCtx.createScriptProcessor(1024, 1, 1);
+  const td = new Uint8Array(offAnalyser.fftSize);
+  const fd = new Uint8Array(offAnalyser.frequencyBinCount);
+  let frameCount = 0;
+
+  processor.onaudioprocess = () => {
+    offAnalyser.getByteTimeDomainData(td);
+    offAnalyser.getByteFrequencyData(fd);
+    const timeSec = (frameCount * 1024) / audioBuffer.sampleRate;
+    const now = timeSec * 1000;
+    const result = engine.processFrame(td, fd, now, audioBuffer.sampleRate, offAnalyser.fftSize);
+    for (const evt of result.events) {
+      if (evt.type === 'jump' || evt.type === 'du') {
+        detections.push({ time: timeSec, type: evt.type, sigScore: evt.sigScore ?? 0 });
+      } else if (evt.type === 'rejected') {
+        rejections.push({ time: timeSec, sigScore: evt.sigScore });
+      }
+    }
+    frameCount++;
+  };
+
+  offAnalyser.connect(processor);
+  processor.connect(offCtx.destination);
+
+  await offCtx.startRendering();
+
+  // Update UI
+  updateStats();
+  computeMetrics();
+  drawMarkers();
+
+  // Populate log
+  for (const d of detections) addLogEntry(d.time, d.type, d.sigScore);
+  for (const r of rejections) addLogEntry(r.time, 'rejected', r.sigScore);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   METRICS
+// ═══════════════════════════════════════════════════════════════
+function computeMetrics() {
+  if (groundTruth.length === 0) {
+    mPrec.textContent = '—';
+    mRec.textContent = '—';
+    mF1.textContent = '—';
+    return;
+  }
+
+  const tolSec = MATCH_TOLERANCE_MS / 1000;
+  const gtMatched = new Set();
+  let tp = 0;
+
+  // For each detection, find closest unmatched ground truth
+  const sortedDet = [...detections].sort((a, b) => a.time - b.time);
+  for (const d of sortedDet) {
+    let bestIdx = -1, bestDist = Infinity;
+    for (let i = 0; i < groundTruth.length; i++) {
+      if (gtMatched.has(i)) continue;
+      const dist = Math.abs(d.time - groundTruth[i]);
+      if (dist < bestDist && dist <= tolSec) {
+        bestDist = dist;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx >= 0) {
+      tp++;
+      gtMatched.add(bestIdx);
+    }
+  }
+
+  const fp = detections.length - tp;
+  const fn = groundTruth.length - tp;
+  const precision = detections.length > 0 ? tp / detections.length : 0;
+  const recall = groundTruth.length > 0 ? tp / groundTruth.length : 0;
+  const f1 = (precision + recall) > 0 ? 2 * precision * recall / (precision + recall) : 0;
+
+  mPrec.textContent = (precision * 100).toFixed(0) + '%';
+  mRec.textContent = (recall * 100).toFixed(0) + '%';
+  mF1.textContent = (f1 * 100).toFixed(0) + '%';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   UI HELPERS
+// ═══════════════════════════════════════════════════════════════
+function updateStats() {
+  const st = engine.getStats();
+  stTotal.textContent = st.total;
+  stDU.textContent = st.du;
+  stBPM.textContent = st.bpm > 0 ? st.bpm : '—';
+  stRej.textContent = rejections.length;
+}
+
+function updateTimeDisplay(currentSec) {
+  if (!audioBuffer) return;
+  const fmt = s => {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return m + ':' + String(sec).padStart(2, '0');
+  };
+  waveTime.textContent = fmt(currentSec) + ' / ' + fmt(audioBuffer.duration);
+}
+
+function addLogEntry(timeSec, type, sigScore) {
+  const entry = document.createElement('div');
+  entry.className = 'log-entry ' + type;
+  const fmt = s => {
+    const m = Math.floor(s / 60);
+    const sec = (s % 60).toFixed(2);
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
+  };
+  entry.innerHTML = `<span class="time">${fmt(timeSec)}</span> <span class="type">${type.toUpperCase()}</span> sig=${(sigScore ?? 0).toFixed(3)}`;
+  logWrap.appendChild(entry);
+  logWrap.scrollTop = logWrap.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   EVENTS
+// ═══════════════════════════════════════════════════════════════
+
+// File loading
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+
+// Play/Stop
+playBtn.addEventListener('click', () => {
+  if (isPlaying) stopPlayback();
+  else startPlayback(0);
+});
+
+// Reprocess
+reprocessBtn.addEventListener('click', reprocess);
+
+// Clear ground truth
+clearGtBtn.addEventListener('click', () => {
+  groundTruth = [];
+  localStorage.removeItem('skip_gt_' + fileNameEl.textContent);
+  drawMarkers();
+  computeMetrics();
+});
+
+// Speed buttons
+document.querySelectorAll('.speed-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    playbackRate = parseFloat(btn.dataset.speed);
+    if (isPlaying && sourceNode) {
+      sourceNode.playbackRate.value = playbackRate;
+    }
+  });
+});
+
+// Click on waveform for ground truth / seek
+markerCanvas.addEventListener('click', e => {
+  if (!audioBuffer) return;
+  const rect = markerCanvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const pct = x / rect.width;
+  const timeSec = pct * audioBuffer.duration;
+
+  if (e.shiftKey) {
+    // Shift+click = seek
+    if (isPlaying) stopPlayback();
+    startPlayback(timeSec);
+  } else {
+    // Normal click = add ground truth
+    // Check if there's already a GT marker nearby — if so, remove it
+    const nearby = groundTruth.findIndex(t => Math.abs(t - timeSec) < 0.1);
+    if (nearby >= 0) {
+      groundTruth.splice(nearby, 1);
+    } else {
+      groundTruth.push(timeSec);
+      groundTruth.sort((a, b) => a - b);
+      addLogEntry(timeSec, 'gt', 0);
+    }
+    saveGroundTruth();
+    drawMarkers();
+    computeMetrics();
+  }
+});
+
+// Persist ground truth in localStorage
+function saveGroundTruth() {
+  const key = 'skip_gt_' + fileNameEl.textContent;
+  localStorage.setItem(key, JSON.stringify(groundTruth));
+}
+
+function loadGroundTruth() {
+  const key = 'skip_gt_' + fileNameEl.textContent;
+  const saved = localStorage.getItem(key);
+  if (saved) {
+    groundTruth = JSON.parse(saved);
+    drawMarkers();
+  }
+}
+
+// Resize
+window.addEventListener('resize', () => {
+  if (audioBuffer) {
+    drawWaveform();
+    drawMarkers();
+  }
+});
+
+// Auto-load corda.m4a if present (try to fetch it)
+(async () => {
+  try {
+    const resp = await fetch('corda.m4a');
+    if (resp.ok) {
+      const blob = await resp.blob();
+      const file = new File([blob], 'corda.m4a', { type: blob.type });
+      await loadFile(file);
+      loadGroundTruth();
+    }
+  } catch(e) { /* not found, user will load manually */ }
+})();
+</script>
+</body>
+</html>

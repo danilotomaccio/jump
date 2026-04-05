@@ -509,92 +509,29 @@
   </footer>
 </div>
 
-<script>
-// ═══════════════════════════════════════════════════════════════
-//   ENGINE CONSTANTS
-// ═══════════════════════════════════════════════════════════════
-
-const S = { IDLE: 'IDLE', LEARNING: 'LEARNING', TRACKING: 'TRACKING', PAUSED: 'PAUSED' };
-
-// Learning
-const N_LEARN       = 4;     // peaks to collect before locking tempo
-
-// Prediction window
-const W_FACTOR      = 0.28;  // window = ±28% of T around next expected peak
-const THR_WIN_MULT  = 0.58;  // threshold inside window = 58% of normal
-
-// Double under: gap < T × DU_RATIO is a double under
-const DU_RATIO      = 0.44;
-
-// Tempo EMA: lower = slower to change, more stable
-const TEMPO_ALPHA   = 0.22;
-
-// Pause detection
-const PAUSE_MULT    = 2.6;   // no peak for T × PAUSE_MULT → pause
-const PAUSE_ABS     = 2800;  // absolute ceiling (ms) — even for very slow jumpers
-
-// After a pause shorter than RESUME_GRACE ms, skip re-learning and trust old T
-const RESUME_GRACE  = 9000;
-
-// Hard floor: ignore peaks closer than this (prevents double-firing on one hit)
-const REFRACTORY    = 110;
-
-// Spectral gate — signature scoring weights and thresholds
-const SIG_WEIGHT_FLAT   = 0.45;  // spectral flatness weight
-const SIG_WEIGHT_CREST  = 0.30;  // crest factor weight
-const SIG_WEIGHT_CENT   = 0.25;  // spectral centroid weight
-const SIG_MIN_SCORE     = 0.30;  // minimum signature score to accept a peak as a jump
-const CREST_ROPE_MIN    = 3.0;   // rope snaps usually have crest factor > 3
-const CREST_NORM_MAX    = 12.0;  // normalize crest factor to [0,1] in this range
-const CENT_ROPE_MIN_HZ  = 1200;  // rope centroid usually > 1200 Hz
-const CENT_ROPE_MAX_HZ  = 10000; // upper range for normalization
-const FLAT_ROPE_MIN     = 0.15;  // rope flatness usually > 0.15 (broadband)
-const TEMPLATE_BLEND    = 0.35;  // how much to weight user template vs generic thresholds
-
-const HIST_MAX      = 48;
-const RIBBON_SCALE  = 1.6;   // visual gain on level bar
+<script type="module">
+import { JumpEngine, S, DEFAULTS, computeRMS, computeSpectralFlatness, computeSpectralCentroid } from './engine.js';
 
 // ═══════════════════════════════════════════════════════════════
-//   MUTABLE STATE
+//   ENGINE INSTANCE
 // ═══════════════════════════════════════════════════════════════
-let engineState  = S.IDLE;
-let estimatedT   = 0;       // current period estimate (ms), EMA-smoothed
-let lastPeakTime = 0;       // timestamp of last confirmed peak (performance.now)
-let learnBuf     = [];      // raw timestamps during learning
-let peakArmed    = false;   // hysteresis gate
+const engine = new JumpEngine();
 
-// Counters
-let totalJumps   = 0;
-let duJumps      = 0;
-let strikesDone  = 0;   // completed runs
-let bestRun      = 0;   // best run (jumps)
-let currentRun   = 0;   // jumps in this run
-let savedT       = 0;   // T preserved across a pause (for fast resume)
+const HIST_MAX     = DEFAULTS.HIST_MAX;
+const RIBBON_SCALE = DEFAULTS.RIBBON_SCALE;
 
-// Session
-let noiseFloor   = 0;
+// ═══════════════════════════════════════════════════════════════
+//   UI-ONLY STATE
+// ═══════════════════════════════════════════════════════════════
 let sensitivity  = 5;
 let sessionStart = null;
 let timerHandle  = null;
+let history      = [];   // { du: bool, sep: bool }
 
-// History
-let history = [];   // { du: bool, sep: bool }
-
-// Audio
+// Audio plumbing
 let audioCtx = null, analyser = null, dataArray = null, freqArray = null, stream = null;
 let rafHandle  = null;
 let isListening = false;
-
-// Spectral baseline (from calibration)
-let baselineFlatness = 0;
-let baselineCentroid = 0;
-
-// Spectral template (learned from user's rope)
-let ropeTemplate = { flatness: 0, crest: 0, centroid: 0, count: 0 };
-
-// Debug: last rejected/accepted info
-let lastSigScore = 0;
-let lastSigRejected = false;
 
 // ═══════════════════════════════════════════════════════════════
 //   DOM
@@ -627,297 +564,6 @@ const calibPct      = $('calibPct');
 const sessionTime   = $('sessionTime');
 
 // ═══════════════════════════════════════════════════════════════
-//   AUDIO HELPERS
-// ═══════════════════════════════════════════════════════════════
-function computeRMS(arr) {
-  let s = 0;
-  for (let i = 0; i < arr.length; i++) { const v = (arr[i] - 128) / 128; s += v * v; }
-  return Math.sqrt(s / arr.length);
-}
-
-function computePeak(arr) {
-  let m = 0;
-  for (let i = 0; i < arr.length; i++) { const v = Math.abs(arr[i] - 128) / 128; if (v > m) m = v; }
-  return m;
-}
-
-function baseThreshold() {
-  const base = noiseFloor || 0.012;
-  // sens 1 → multiplier ~6.2×  |  sens 10 → multiplier ~1×
-  const mult = 1 + (10 - sensitivity) * 0.58;
-  return Math.max(base * mult * 2.6, 0.016);
-}
-
-// ═══════════════════════════════════════════════════════════════
-//   SPECTRAL FEATURE FUNCTIONS
-// ═══════════════════════════════════════════════════════════════
-
-function computeSpectralFlatness(freq) {
-  // Geometric mean / arithmetic mean of power spectrum
-  // High → broadband (noise-like, rope snap) | Low → tonal (whistle, voice)
-  let logSum = 0, linSum = 0, n = 0;
-  const eps = 1e-10;
-  for (let i = 1; i < freq.length; i++) {  // skip DC bin
-    const v = freq[i] / 255 + eps;
-    logSum += Math.log(v);
-    linSum += v;
-    n++;
-  }
-  if (n === 0) return 0;
-  const geoMean = Math.exp(logSum / n);
-  const ariMean = linSum / n;
-  return ariMean > eps ? geoMean / ariMean : 0;
-}
-
-function computeCrestFactor(timeArr) {
-  // Peak / RMS — high = impulsive transient (rope), low = sustained (voice)
-  let peak = 0, sumSq = 0;
-  for (let i = 0; i < timeArr.length; i++) {
-    const v = Math.abs(timeArr[i] - 128) / 128;
-    if (v > peak) peak = v;
-    sumSq += v * v;
-  }
-  const rms = Math.sqrt(sumSq / timeArr.length);
-  return rms > 1e-8 ? peak / rms : 0;
-}
-
-function computeSpectralCentroid(freq, sampleRate, fftSize) {
-  // Weighted average frequency — rope snaps have mid-high centroid
-  let weightedSum = 0, totalEnergy = 0;
-  const binWidth = sampleRate / fftSize;
-  for (let i = 1; i < freq.length; i++) {
-    const energy = freq[i] / 255;
-    const hz = i * binWidth;
-    weightedSum += energy * hz;
-    totalEnergy += energy;
-  }
-  return totalEnergy > 1e-8 ? weightedSum / totalEnergy : 0;
-}
-
-function computeSignatureScore(flatness, crest, centroid) {
-  // Normalize each feature to [0, 1] and combine with weights
-
-  // Flatness: higher = more likely rope (broadband)
-  // Subtract baseline to ignore ambient noise character
-  const adjFlat = Math.max(0, flatness - baselineFlatness * 0.5);
-  let flatScore = Math.min(1, adjFlat / 0.6);
-
-  // Crest factor: rope snaps have high crest (impulsive)
-  let crestScore = Math.min(1, Math.max(0, (crest - CREST_ROPE_MIN) / (CREST_NORM_MAX - CREST_ROPE_MIN)));
-
-  // Centroid: rope is mid-high frequency
-  const adjCent = centroid;
-  let centScore = Math.min(1, Math.max(0, (adjCent - CENT_ROPE_MIN_HZ) / (CENT_ROPE_MAX_HZ - CENT_ROPE_MIN_HZ)));
-
-  // If we have a learned template, blend generic score with template match
-  if (ropeTemplate.count >= 3) {
-    const tFlat  = 1 - Math.min(1, Math.abs(flatness - ropeTemplate.flatness) / 0.4);
-    const tCrest = 1 - Math.min(1, Math.abs(crest - ropeTemplate.crest) / 8);
-    const tCent  = 1 - Math.min(1, Math.abs(centroid - ropeTemplate.centroid) / 4000);
-    flatScore  = flatScore  * (1 - TEMPLATE_BLEND) + tFlat  * TEMPLATE_BLEND;
-    crestScore = crestScore * (1 - TEMPLATE_BLEND) + tCrest * TEMPLATE_BLEND;
-    centScore  = centScore  * (1 - TEMPLATE_BLEND) + tCent  * TEMPLATE_BLEND;
-  }
-
-  return flatScore * SIG_WEIGHT_FLAT + crestScore * SIG_WEIGHT_CREST + centScore * SIG_WEIGHT_CENT;
-}
-
-// ═══════════════════════════════════════════════════════════════
-//   STATE MACHINE TRANSITIONS
-// ═══════════════════════════════════════════════════════════════
-function enterLearning() {
-  engineState = S.LEARNING;
-  learnBuf    = [];
-  badge('state-learning', 'APPRENDIMENTO');
-}
-
-function enterTracking() {
-  engineState = S.TRACKING;
-  badge('state-tracking', 'TRACKING');
-}
-
-function enterPaused(now) {
-  savedT = estimatedT;
-
-  // Close the current run
-  if (currentRun > 0) {
-    strikesDone++;
-    if (currentRun > bestRun) bestRun = currentRun;
-    addSeparator();
-  }
-  currentRun  = 0;
-  engineState = S.PAUSED;
-
-  badge('state-paused', 'PAUSA');
-  updateStats();
-  ribbonWindow.style.opacity = '0';
-  thrLow.style.opacity = '0';
-}
-
-// Called when a peak arrives while PAUSED
-function resumeFromPause(now) {
-  const pauseDuration = now - lastPeakTime;
-  if (pauseDuration < RESUME_GRACE && savedT > 0) {
-    // Short pause → trust old period, jump straight into TRACKING
-    estimatedT = savedT;
-    enterTracking();
-  } else {
-    // Long pause → re-learn from zero
-    estimatedT = 0;
-    enterLearning();
-    learnBuf.push(now);
-  }
-  currentRun = 0;
-}
-
-function lockTempo() {
-  // Compute median inter-peak gap from learning buffer, filtering DU-length gaps
-  const gaps = [];
-  for (let i = 1; i < learnBuf.length; i++) gaps.push(learnBuf[i] - learnBuf[i - 1]);
-  gaps.sort((a, b) => a - b);
-  const median = gaps[Math.floor(gaps.length / 2)];
-  // Only include gaps > 50% of median (removes spurious DU gaps during learning)
-  const validGaps = gaps.filter(g => g > median * 0.52);
-  estimatedT = validGaps.reduce((a, b) => a + b, 0) / validGaps.length;
-  enterTracking();
-}
-
-function updateTempo(gap) {
-  if (estimatedT === 0) estimatedT = gap;
-  else estimatedT = estimatedT * (1 - TEMPO_ALPHA) + gap * TEMPO_ALPHA;
-}
-
-// ═══════════════════════════════════════════════════════════════
-//   PEAK HANDLER
-//   Called exactly once per confirmed audio transient
-// ═══════════════════════════════════════════════════════════════
-function onPeak(now) {
-  const gap  = now - lastPeakTime;
-  let   isDU = false;
-
-  switch (engineState) {
-
-    case S.IDLE:
-      // First peak ever — start learning
-      enterLearning();
-      learnBuf.push(now);
-      break;
-
-    case S.LEARNING:
-      learnBuf.push(now);
-      if (learnBuf.length >= N_LEARN + 1) lockTempo();
-      break;
-
-    case S.TRACKING:
-      if (gap < estimatedT * DU_RATIO && gap >= REFRACTORY) {
-        //
-        //  DOUBLE UNDER
-        //
-        //  Two close peaks = two rope rotations in one jump.
-        //  We count the PAIR as one jump (totalJumps already incremented
-        //  for the first hit); here we mark the second hit as a DU.
-        //  We do NOT update estimatedT with this short gap — it would
-        //  corrupt the period model. We also do NOT re-set lastPeakTime
-        //  to this hit; the NEXT normal-gap peak will reference the
-        //  FIRST hit of the DU pair, giving a gap ≈ T (or slightly >T
-        //  because the jumper was in the air longer). The EMA then
-        //  naturally absorbs the small drift.
-        //
-        isDU = true;
-        duJumps++;
-        // Update lastPeakTime so the NEXT peak gap is measured from here
-        // (not from the first DU hit, which would give gap ≈ T+halfDU)
-        lastPeakTime = now;
-        flashCounter(true);
-        spawnRipple(true);
-        addHistoryDot(true);
-        updateStats();
-        // Return early — we don't increment totalJumps for the second hit
-        return;
-      } else {
-        // Normal jump: update period estimate
-        updateTempo(gap);
-      }
-      break;
-
-    case S.PAUSED:
-      resumeFromPause(now);
-      break;
-  }
-
-  // Confirmed single jump
-  totalJumps++;
-  currentRun++;
-  lastPeakTime = now;
-
-  flashCounter(false);
-  spawnRipple(false);
-  addHistoryDot(false);
-  updateStats();
-  updateBPM();
-}
-
-// ═══════════════════════════════════════════════════════════════
-//   PAUSE WATCHDOG  (called every animation frame)
-// ═══════════════════════════════════════════════════════════════
-function checkPauseTimeout(now) {
-  if (engineState !== S.TRACKING && engineState !== S.LEARNING) return;
-  if (lastPeakTime === 0) return;
-
-  const elapsed = now - lastPeakTime;
-  const limit   = engineState === S.TRACKING
-    ? Math.min(Math.max(estimatedT * PAUSE_MULT, PAUSE_ABS), 5000)
-    : PAUSE_ABS;
-
-  if (elapsed > limit) enterPaused(now);
-}
-
-// ═══════════════════════════════════════════════════════════════
-//   PREDICTION WINDOW  (for ribbon visualisation)
-// ═══════════════════════════════════════════════════════════════
-function updateWindowViz(now) {
-  if (engineState !== S.TRACKING || estimatedT === 0 || lastPeakTime === 0) {
-    ribbonWindow.style.opacity = '0';
-    thrLow.style.opacity = '0';
-    return;
-  }
-
-  // progress: 0 = just jumped, 1 = exactly on time, >1 = late
-  const progress = (now - lastPeakTime) / estimatedT;
-  const inWindow = progress >= (1 - W_FACTOR) && progress <= (1 + W_FACTOR);
-
-  // Map the window onto the ribbon track as a fraction [0,1]
-  const wStart = Math.max(0, Math.min(1, progress - W_FACTOR));
-  const wEnd   = Math.max(0, Math.min(1, progress + W_FACTOR));
-  ribbonWindow.style.left    = (wStart * 100) + '%';
-  ribbonWindow.style.width   = ((wEnd - wStart) * 100) + '%';
-  ribbonWindow.style.opacity = inWindow ? '1' : '0.4';
-
-  // Low threshold marker (visible inside window)
-  const tLow = baseThreshold() * THR_WIN_MULT;
-  thrLow.style.left    = Math.min(tLow * RIBBON_SCALE * 100, 100) + '%';
-  thrLow.style.opacity = inWindow ? '1' : '0.3';
-}
-
-function isInWindow(now) {
-  if (engineState !== S.TRACKING || estimatedT === 0 || lastPeakTime === 0) return false;
-  const progress = (now - lastPeakTime) / estimatedT;
-  return progress >= (1 - W_FACTOR) && progress <= (1 + W_FACTOR);
-}
-
-// ═══════════════════════════════════════════════════════════════
-//   SPECTRAL TEMPLATE — learns the user's rope sound
-// ═══════════════════════════════════════════════════════════════
-function updateRopeTemplate(flatness, crest, centroid) {
-  const c = ropeTemplate.count;
-  // Running average
-  ropeTemplate.flatness = (ropeTemplate.flatness * c + flatness) / (c + 1);
-  ropeTemplate.crest    = (ropeTemplate.crest    * c + crest)    / (c + 1);
-  ropeTemplate.centroid = (ropeTemplate.centroid * c + centroid) / (c + 1);
-  ropeTemplate.count++;
-}
-
-// ═══════════════════════════════════════════════════════════════
 //   MAIN AUDIO LOOP
 // ═══════════════════════════════════════════════════════════════
 function audioLoop() {
@@ -925,58 +571,76 @@ function audioLoop() {
   analyser.getByteTimeDomainData(dataArray);
   analyser.getByteFrequencyData(freqArray);
 
-  const now  = performance.now();
-  const peak = computePeak(dataArray);
-  const lvl  = Math.min(peak * RIBBON_SCALE, 1);
-
-  // Effective threshold: lower inside prediction window
-  const thr    = baseThreshold();
-  const effThr = isInWindow(now) ? thr * THR_WIN_MULT : thr;
+  const now = performance.now();
+  const result = engine.processFrame(dataArray, freqArray, now, audioCtx.sampleRate, analyser.fftSize);
+  const { frame } = result;
 
   // Update ribbon
-  ribbonLevel.style.width = (lvl * 100) + '%';
-  thrNormal.style.left    = Math.min(thr * RIBBON_SCALE * 100, 100) + '%';
-  updateWindowViz(now);
-  checkPauseTimeout(now);
+  ribbonLevel.style.width = (frame.lvl * 100) + '%';
+  thrNormal.style.left    = Math.min(frame.thr * RIBBON_SCALE * 100, 100) + '%';
+  updateWindowViz(frame);
 
-  // Hysteresis: must fall below 52% of effThr before re-arming
-  if (lvl < effThr * 0.52) peakArmed = true;
-
-  if (peakArmed && lvl >= effThr) {
-    const gap = now - lastPeakTime;
-    if (gap >= REFRACTORY) {
-      // Spectral gate: compute signature score
-      const flatness = computeSpectralFlatness(freqArray);
-      const crest    = computeCrestFactor(dataArray);
-      const centroid = computeSpectralCentroid(freqArray, audioCtx.sampleRate, analyser.fftSize);
-      const sigScore = computeSignatureScore(flatness, crest, centroid);
-      lastSigScore = sigScore;
-
-      // During IDLE/LEARNING, be lenient (we need peaks to learn from)
-      // During TRACKING, enforce the spectral gate
-      const gateActive = engineState === S.TRACKING || engineState === S.PAUSED;
-      const passesGate = !gateActive || sigScore >= SIG_MIN_SCORE;
-
-      if (passesGate) {
-        peakArmed = false;
-        lastSigRejected = false;
-        // Update rope template during learning and early tracking
-        if (engineState === S.LEARNING || (engineState === S.TRACKING && ropeTemplate.count < 20)) {
-          updateRopeTemplate(flatness, crest, centroid);
-        }
-        onPeak(now);
-        ribbonInfo.textContent = estimatedT > 0
-          ? 'T=' + Math.round(estimatedT) + 'ms  sig=' + sigScore.toFixed(2)
-          : 'sig=' + sigScore.toFixed(2);
-      } else {
-        // Rejected by spectral gate
-        lastSigRejected = true;
-        ribbonInfo.textContent = '✗ rifiutato (sig=' + sigScore.toFixed(2) + ')';
-      }
+  // Process events
+  for (const evt of result.events) {
+    switch (evt.type) {
+      case 'jump':
+        flashCounter(false);
+        spawnRipple(false);
+        addHistoryDot(false);
+        updateStats();
+        updateBPM();
+        ribbonInfo.textContent = engine.estimatedT > 0
+          ? 'T=' + Math.round(engine.estimatedT) + 'ms  sig=' + (evt.sigScore ?? 0).toFixed(2)
+          : 'sig=' + (evt.sigScore ?? 0).toFixed(2);
+        break;
+      case 'du':
+        flashCounter(true);
+        spawnRipple(true);
+        addHistoryDot(true);
+        updateStats();
+        ribbonInfo.textContent = 'DU  sig=' + (evt.sigScore ?? 0).toFixed(2);
+        break;
+      case 'pause':
+        if (evt.closedRun > 0) addSeparator();
+        updateStats();
+        ribbonWindow.style.opacity = '0';
+        thrLow.style.opacity = '0';
+        break;
+      case 'rejected':
+        ribbonInfo.textContent = '✗ rifiutato (sig=' + evt.sigScore.toFixed(2) + ')';
+        break;
+      case 'state':
+        if (evt.state === S.LEARNING) badge('state-learning', 'APPRENDIMENTO');
+        else if (evt.state === S.TRACKING) badge('state-tracking', 'TRACKING');
+        else if (evt.state === S.PAUSED) badge('state-paused', 'PAUSA');
+        break;
     }
   }
 
   rafHandle = requestAnimationFrame(audioLoop);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   PREDICTION WINDOW VIZ
+// ═══════════════════════════════════════════════════════════════
+function updateWindowViz(frame) {
+  const C = engine.cfg;
+  if (engine.state !== S.TRACKING || engine.estimatedT === 0 || engine.lastPeakTime === 0) {
+    ribbonWindow.style.opacity = '0';
+    thrLow.style.opacity = '0';
+    return;
+  }
+  const progress = frame.windowProgress;
+  const inWindow = progress >= (1 - C.W_FACTOR) && progress <= (1 + C.W_FACTOR);
+  const wStart = Math.max(0, Math.min(1, progress - C.W_FACTOR));
+  const wEnd   = Math.max(0, Math.min(1, progress + C.W_FACTOR));
+  ribbonWindow.style.left    = (wStart * 100) + '%';
+  ribbonWindow.style.width   = ((wEnd - wStart) * 100) + '%';
+  ribbonWindow.style.opacity = inWindow ? '1' : '0.4';
+
+  const tLow = frame.thr * C.THR_WIN_MULT;
+  thrLow.style.left    = Math.min(tLow * RIBBON_SCALE * 100, 100) + '%';
+  thrLow.style.opacity = inWindow ? '1' : '0.3';
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1004,9 +668,7 @@ async function calibrate() {
     requestAnimationFrame(tick);
   });
 
-  noiseFloor       = rmsSum  / samples;
-  baselineFlatness = flatSum / samples;
-  baselineCentroid = centSum / samples;
+  engine.setCalibration(rmsSum / samples, flatSum / samples, centSum / samples);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1035,11 +697,11 @@ async function startListening() {
   await calibrate();
   calibOverlay.classList.remove('visible');
 
-  engineState  = S.IDLE;
+  engine.state = S.IDLE;
+  engine.lastPeakTime = 0;
+  engine.peakArmed = false;
   isListening  = true;
   sessionStart = Date.now();
-  peakArmed    = false;
-  lastPeakTime = 0;
 
   badge('state-idle', 'IN ASCOLTO');
   startBtn.textContent = 'Ferma';
@@ -1058,9 +720,19 @@ function stopListening() {
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
 
   // Close open run
-  if (currentRun > 0 && engineState !== S.PAUSED) enterPaused(performance.now());
+  if (engine.currentRun > 0 && engine.state !== S.PAUSED) {
+    const evts = engine.processFrame(
+      new Uint8Array(1024).fill(128),
+      new Uint8Array(512),
+      performance.now(),
+      44100, 1024
+    );
+    for (const evt of evts.events) {
+      if (evt.type === 'pause' && evt.closedRun > 0) addSeparator();
+    }
+  }
 
-  engineState = S.IDLE;
+  engine.state = S.IDLE;
   badge('state-idle', 'FERMO');
   startBtn.textContent = 'Riprendi';
   startBtn.classList.remove('active');
@@ -1071,14 +743,8 @@ function stopListening() {
 
 function resetAll() {
   stopListening();
-  totalJumps = 0; duJumps = 0;
-  strikesDone = 0; bestRun = 0; currentRun = 0;
-  estimatedT = 0; lastPeakTime = 0; savedT = 0;
-  learnBuf = []; history = [];
-  ropeTemplate = { flatness: 0, crest: 0, centroid: 0, count: 0 };
-  baselineFlatness = 0; baselineCentroid = 0;
-  lastSigScore = 0; lastSigRejected = false;
-  engineState = S.IDLE;
+  engine.reset();
+  history = [];
   badge('state-idle', 'PRONTO');
   sessionStart = null;
   sessionTime.textContent  = 'Sessione: 00:00';
@@ -1151,25 +817,26 @@ function initHistoryDots() {
 }
 
 function updateStats() {
-  counterEl.textContent    = totalJumps;
-  duCountEl.textContent    = duJumps;
-  singleEl.textContent     = totalJumps - duJumps;
-  strikeEl.textContent     = strikesDone;
-  bestRunEl.textContent    = bestRun;
-  currentRunEl.textContent = currentRun;
+  const st = engine.getStats();
+  counterEl.textContent    = st.total;
+  duCountEl.textContent    = st.du;
+  singleEl.textContent     = st.singles;
+  strikeEl.textContent     = st.strikesDone;
+  bestRunEl.textContent    = st.bestRun;
+  currentRunEl.textContent = st.currentRun;
 
-  const pct = totalJumps > 0 ? Math.round((duJumps / totalJumps) * 100) : 0;
-  duPctEl.textContent = totalJumps > 0 ? pct + '% dei salti' : '—';
+  const pct = st.total > 0 ? Math.round((st.du / st.total) * 100) : 0;
+  duPctEl.textContent = st.total > 0 ? pct + '% dei salti' : '—';
 
-  if (currentRun > 0 && engineState === S.TRACKING) {
+  if (st.currentRun > 0 && engine.state === S.TRACKING) {
     currentRunSub.textContent = 'in corso ▶';
-    if (bestRun > 0) {
+    if (st.bestRun > 0) {
       runBarWrap.style.display = '';
-      const p = Math.min(currentRun / bestRun, 1);
+      const p = Math.min(st.currentRun / st.bestRun, 1);
       runBarFill.style.width = (p * 100) + '%';
-      runBarPct.textContent   = currentRun >= bestRun ? '🏆 nuovo record!' : Math.round(p * 100) + '% del best';
+      runBarPct.textContent   = st.currentRun >= st.bestRun ? '🏆 nuovo record!' : Math.round(p * 100) + '% del best';
     }
-  } else if (engineState === S.PAUSED) {
+  } else if (engine.state === S.PAUSED) {
     currentRunSub.textContent = 'run chiuso';
   } else {
     currentRunSub.textContent = '—';
@@ -1177,9 +844,10 @@ function updateStats() {
 }
 
 function updateBPM() {
-  if (estimatedT > 0) {
-    bpmEl.textContent      = Math.round(60000 / estimatedT);
-    ribbonInfo.textContent = 'T = ' + Math.round(estimatedT) + ' ms';
+  const st = engine.getStats();
+  if (st.bpm > 0) {
+    bpmEl.textContent      = st.bpm;
+    ribbonInfo.textContent = 'T = ' + Math.round(st.estimatedT) + ' ms';
   }
 }
 
@@ -1204,7 +872,9 @@ $('resetBtn').addEventListener('click', resetAll);
 $('sensSlider').addEventListener('input', function () {
   sensitivity = +this.value;
   $('sensVal').textContent = sensitivity;
-  thrNormal.style.left = Math.min(baseThreshold() * RIBBON_SCALE * 100, 100) + '%';
+  engine.setSensitivity(sensitivity);
+  const thr = engine._baseThreshold();
+  thrNormal.style.left = Math.min(thr * RIBBON_SCALE * 100, 100) + '%';
 });
 
 // Boot
