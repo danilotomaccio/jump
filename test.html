@@ -431,9 +431,10 @@
         <input type="range" id="bpQ" min="0.1" max="20" step="0.1" value="2.0">
         <span class="val" id="bpQVal">2.0</span>
       </div>
-      <div style="display:flex;gap:8px;margin-top:6px">
-        <label class="chk-label"><input type="checkbox" id="filterPlayback" checked> Applica a playback</label>
-        <label class="chk-label"><input type="checkbox" id="filterAnalysis"> Applica ad analisi</label>
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <button class="btn btn-secondary" id="applyFiltersBtn" style="font-size:.76rem;padding:7px 14px">&#127899; Applica ai visuali</button>
+        <button class="btn btn-secondary" id="resetFiltersBtn" style="font-size:.76rem;padding:7px 14px;display:none">&#8617; Originale</button>
+        <span id="filteredBadge" style="display:none;font-family:'JetBrains Mono',monospace;font-size:.62rem;letter-spacing:.15em;color:var(--du-color);background:rgba(249,168,37,.12);padding:3px 8px;border-radius:4px">FILTRATO</span>
       </div>
     </div>
 
@@ -662,6 +663,14 @@ const MATCH_TOLERANCE_MS = 80;
 
 // Filter state
 let hpOn = false, lpOn = false, bpOn = false;
+let filteredChannelData = null;  // null = showing original
+
+function getDisplayData() {
+  return filteredChannelData || audioBuffer.getChannelData(0);
+}
+function anyFilterOn() {
+  return hpOn || lpOn || bpOn;
+}
 
 // Interaction
 let isDragging = false;
@@ -711,8 +720,9 @@ const bpFreq = $('bpFreq'), bpQ = $('bpQ');
 const hpFreqVal = $('hpFreqVal'), hpQVal = $('hpQVal');
 const lpFreqVal = $('lpFreqVal'), lpQVal = $('lpQVal');
 const bpFreqVal = $('bpFreqVal'), bpQVal = $('bpQVal');
-const filterPlayback = $('filterPlayback');
-const filterAnalysis = $('filterAnalysis');
+const applyFiltersBtn = $('applyFiltersBtn');
+const resetFiltersBtn = $('resetFiltersBtn');
+const filteredBadge = $('filteredBadge');
 const bandOverlayChk = $('bandOverlayChk');
 
 // ==================================================================
@@ -804,7 +814,7 @@ function drawWaveform() {
   ctx.lineWidth = 0.5;
   ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
 
-  const data = audioBuffer.getChannelData(0);
+  const data = getDisplayData();
   const sr = audioBuffer.sampleRate;
   const sStart = Math.floor(viewStart * sr);
   const sEnd = Math.floor(viewEnd * sr);
@@ -1213,7 +1223,7 @@ function connectAudioGraph() {
   filterNodes.forEach(n => n.disconnect());
   analyser.disconnect();
 
-  const useFilters = filterPlayback.checked && filterNodes.length > 0;
+  const useFilters = filterNodes.length > 0;
   if (useFilters) {
     sourceNode.connect(filterNodes[0]);
     for (let i = 0; i < filterNodes.length - 1; i++) {
@@ -1416,7 +1426,8 @@ async function reprocess() {
   await calibrateFromBuffer();
 
   // Direct processing from raw audio data (no OfflineAudioContext)
-  const data = audioBuffer.getChannelData(0);
+  // Use filtered data if currently viewing filtered visuals
+  const data = getDisplayData();
   const sr = audioBuffer.sampleRate;
   const fftSize = 1024;
   const hann = hannWindow(fftSize);
@@ -1427,11 +1438,7 @@ async function reprocess() {
   const im = new Float32Array(fftSize);
   const numBins = fftSize / 2;
 
-  // Apply filters if requested
   let processData = data;
-  if (filterAnalysis.checked && (hpOn || lpOn || bpOn)) {
-    processData = await applyFiltersOffline(data, sr);
-  }
 
   for (let fr = 0; fr < numFrames; fr++) {
     const off = fr * hop;
@@ -1839,6 +1846,11 @@ document.addEventListener('keydown', e => {
 // ==================================================================
 function toggleFilter(btn, state) {
   btn.classList.toggle('on', state);
+  // Rebuild audio graph if currently playing
+  if (playState === 'playing' && sourceNode && analyser && audioCtx) {
+    buildFilterChain();
+    connectAudioGraph();
+  }
 }
 
 hpToggle.addEventListener('click', () => { hpOn = !hpOn; toggleFilter(hpToggle, hpOn); });
@@ -1854,8 +1866,7 @@ bpFreq.addEventListener('input', () => { bpFreqVal.textContent = bpFreq.value + 
 bpQ.addEventListener('input', () => { bpQVal.textContent = parseFloat(bpQ.value).toFixed(1); updateLiveFilters(); });
 
 function updateLiveFilters() {
-  // Update filter parameters in real-time during playback
-  if (playState !== 'playing' || !filterPlayback.checked) return;
+  if (playState !== 'playing') return;
   for (const node of filterNodes) {
     if (node.type === 'highpass') {
       node.frequency.value = parseFloat(hpFreq.value);
@@ -1869,6 +1880,49 @@ function updateLiveFilters() {
     }
   }
 }
+
+// Apply filters to visuals (spectrogram, waveform, band energy)
+async function applyFiltersToVisuals() {
+  if (!audioBuffer) return;
+  if (!anyFilterOn()) {
+    resetFilteredVisuals();
+    return;
+  }
+  loadingOverlay.style.display = 'flex';
+
+  const original = audioBuffer.getChannelData(0);
+  filteredChannelData = await applyFiltersOffline(original, audioBuffer.sampleRate);
+
+  // Recompute spectrogram + band energies from filtered data
+  specData = computeSpectrogram(filteredChannelData, audioBuffer.sampleRate, 2048, 512);
+  renderSpecImageData();
+  bandData = computeBandEnergies(specData, DEFAULT_BANDS);
+
+  // Show badge
+  filteredBadge.style.display = '';
+  resetFiltersBtn.style.display = '';
+
+  redrawAll();
+  loadingOverlay.style.display = 'none';
+}
+
+function resetFilteredVisuals() {
+  if (!audioBuffer) return;
+  filteredChannelData = null;
+
+  // Recompute from original
+  const original = audioBuffer.getChannelData(0);
+  specData = computeSpectrogram(original, audioBuffer.sampleRate, 2048, 512);
+  renderSpecImageData();
+  bandData = computeBandEnergies(specData, DEFAULT_BANDS);
+
+  filteredBadge.style.display = 'none';
+  resetFiltersBtn.style.display = 'none';
+  redrawAll();
+}
+
+applyFiltersBtn.addEventListener('click', applyFiltersToVisuals);
+resetFiltersBtn.addEventListener('click', resetFilteredVisuals);
 
 // Band overlay toggle
 bandOverlayChk.addEventListener('change', () => {
