@@ -393,6 +393,7 @@
       <span class="region-info" id="regionInfo"></span>
       <button class="btn btn-secondary" id="reprocessBtn">&#10227; Riprocessa</button>
       <button class="btn btn-secondary" id="clearGtBtn">&#10005; Pulisci GT</button>
+      <button class="btn btn-secondary" id="exportBtn" style="background:rgba(56,217,245,.1);border-color:var(--str-color);color:var(--str-color)">&#128202; Esporta JSON</button>
       <div class="speed-group">
         <button class="speed-btn active" data-speed="1">1x</button>
         <button class="speed-btn" data-speed="0.5">0.5x</button>
@@ -706,6 +707,7 @@ const loopChk       = $('loopChk');
 const regionInfo    = $('regionInfo');
 const reprocessBtn  = $('reprocessBtn');
 const clearGtBtn    = $('clearGtBtn');
+const exportBtn     = $('exportBtn');
 const controlsBar   = $('controlsBar');
 const logWrap       = $('logWrap');
 const fileNameEl    = $('fileName');
@@ -1598,6 +1600,134 @@ function updateRegionUI() {
 }
 
 // ==================================================================
+//   EXPORT JSON
+// ==================================================================
+function getBandValueAtTime(timeSec) {
+  if (!specData || !bandData) return null;
+  const hopSec = specData.hopSize / specData.sampleRate;
+  const frameIdx = Math.round(timeSec / hopSec);
+  const result = {};
+  for (const band of bandData) {
+    const idx = Math.max(0, Math.min(band.energies.length - 1, frameIdx));
+    result[band.label] = parseFloat(band.energies[idx].toFixed(6));
+  }
+  return result;
+}
+
+function buildExportData() {
+  // Metrics (recompute to get TP/FP/FN)
+  const tolSec = MATCH_TOLERANCE_MS / 1000;
+  const gtMatched = new Set();
+  let tp = 0;
+  const sorted = [...detections].sort((a, b) => a.time - b.time);
+  for (const d of sorted) {
+    let bestIdx = -1, bestDist = Infinity;
+    for (let i = 0; i < groundTruth.length; i++) {
+      if (gtMatched.has(i)) continue;
+      const dist = Math.abs(d.time - groundTruth[i]);
+      if (dist < bestDist && dist <= tolSec) { bestDist = dist; bestIdx = i; }
+    }
+    if (bestIdx >= 0) { tp++; gtMatched.add(bestIdx); }
+  }
+  const fp = detections.length - tp;
+  const fn = groundTruth.length - tp;
+  const prec = detections.length > 0 ? tp / detections.length : 0;
+  const rec = groundTruth.length > 0 ? tp / groundTruth.length : 0;
+  const f1 = (prec + rec) > 0 ? 2 * prec * rec / (prec + rec) : 0;
+
+  // Band energy full time series (round to save space)
+  const bandExport = bandData ? {
+    hopSec: parseFloat((specData.hopSize / specData.sampleRate).toFixed(6)),
+    fftSize: specData.fftSize,
+    bands: bandData.map(b => ({
+      label: b.label,
+      lo: b.lo,
+      hi: b.hi,
+      color: b.color,
+      values: Array.from(b.energies, v => parseFloat(v.toFixed(5)))
+    }))
+  } : null;
+
+  // Spectral values at event timestamps
+  const spectralAtEvents = [];
+  for (const d of detections) {
+    spectralAtEvents.push({
+      time: parseFloat(d.time.toFixed(4)),
+      source: 'detection',
+      type: d.type,
+      sigScore: parseFloat((d.sigScore || 0).toFixed(4)),
+      bandValues: getBandValueAtTime(d.time)
+    });
+  }
+  for (const t of groundTruth) {
+    spectralAtEvents.push({
+      time: parseFloat(t.toFixed(4)),
+      source: 'groundTruth',
+      type: 'gt',
+      bandValues: getBandValueAtTime(t)
+    });
+  }
+  for (const r of rejections) {
+    spectralAtEvents.push({
+      time: parseFloat(r.time.toFixed(4)),
+      source: 'rejection',
+      sigScore: parseFloat((r.sigScore || 0).toFixed(4)),
+      bandValues: getBandValueAtTime(r.time)
+    });
+  }
+  spectralAtEvents.sort((a, b) => a.time - b.time);
+
+  return {
+    file: {
+      name: fileNameEl.textContent,
+      duration: audioBuffer ? parseFloat(audioBuffer.duration.toFixed(4)) : 0,
+      sampleRate: audioBuffer ? audioBuffer.sampleRate : 0
+    },
+    engineConfig: { ...engine.cfg },
+    filters: {
+      hp: { on: hpOn, freq: parseFloat(hpFreq.value), Q: parseFloat(hpQ.value) },
+      lp: { on: lpOn, freq: parseFloat(lpFreq.value), Q: parseFloat(lpQ.value) },
+      bp: { on: bpOn, freq: parseFloat(bpFreq.value), Q: parseFloat(bpQ.value) }
+    },
+    filteredVisualsActive: filteredChannelData !== null,
+    groundTruth: groundTruth.map(t => parseFloat(t.toFixed(4))),
+    detections: detections.map(d => ({
+      time: parseFloat(d.time.toFixed(4)),
+      type: d.type,
+      sigScore: parseFloat((d.sigScore || 0).toFixed(4))
+    })),
+    rejections: rejections.map(r => ({
+      time: parseFloat(r.time.toFixed(4)),
+      sigScore: parseFloat((r.sigScore || 0).toFixed(4))
+    })),
+    metrics: {
+      precision: parseFloat(prec.toFixed(4)),
+      recall: parseFloat(rec.toFixed(4)),
+      f1: parseFloat(f1.toFixed(4)),
+      tp, fp, fn,
+      toleranceMs: MATCH_TOLERANCE_MS
+    },
+    bandEnergy: bandExport,
+    spectralAtEvents
+  };
+}
+
+function exportJSON() {
+  const data = buildExportData();
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const baseName = (fileNameEl.textContent || 'export').replace(/\.[^.]+$/, '');
+  a.download = baseName + '_analysis.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ==================================================================
 //   ZOOM / PAN
 // ==================================================================
 function zoom(centerTime, factor) {
@@ -1808,7 +1938,11 @@ regionPlayBtn.addEventListener('click', () => {
 });
 
 // Reprocess
+// Reprocess
 reprocessBtn.addEventListener('click', reprocess);
+
+// Export JSON
+exportBtn.addEventListener('click', exportJSON);
 
 // Clear GT
 clearGtBtn.addEventListener('click', () => {
