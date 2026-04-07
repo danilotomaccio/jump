@@ -503,7 +503,7 @@
 
 <div class="loading" id="loadingOverlay" style="display:none">Elaborazione...</div>
 <script type="module">
-import { JumpEngine, S, DEFAULTS, computeRMS, computeSpectralFlatness, computeSpectralCentroid } from './engine.js';
+import { JumpEngine, S, DEFAULTS, computeRMS, computeSpectralFlatness, computeSpectralCentroid, computeBandEnergy, computeBandMeanByte } from './engine.js';
 
 // ==================================================================
 //   FFT (Cooley-Tukey radix-2)
@@ -1185,10 +1185,14 @@ async function calibrateFromBuffer() {
   const fftSize = 1024;
   const hann = hannWindow(fftSize);
   const numFrames = Math.floor((samples - fftSize) / 512) + 1;
-  let rmsSum = 0, flatSum = 0, centSum = 0, count = 0;
+  let rmsSum = 0, flatSum = 0, centSum = 0, bandESum = 0, count = 0;
 
   const re = new Float32Array(fftSize);
   const im = new Float32Array(fftSize);
+
+  const C = engine.cfg;
+  const binW = sr / fftSize;
+  const magBins = fftSize / 2;
 
   for (let fr = 0; fr < numFrames; fr++) {
     const off = fr * 512;
@@ -1206,7 +1210,7 @@ async function calibrateFromBuffer() {
       im[i] = 0;
     }
     fft(re, im);
-    const magBins = fftSize / 2;
+
     // Spectral flatness (geometric/arithmetic mean of magnitudes)
     let logSum = 0, linSum = 0;
     for (let i = 1; i < magBins; i++) {
@@ -1219,18 +1223,27 @@ async function calibrateFromBuffer() {
 
     // Spectral centroid
     let wSum = 0, eSum = 0;
-    const binW = sr / fftSize;
     for (let i = 1; i < magBins; i++) {
       const mag = Math.sqrt(re[i] * re[i] + im[i] * im[i]);
       wSum += mag * i * binW;
       eSum += mag;
     }
     centSum += eSum > 1e-8 ? wSum / eSum : 0;
+
+    // Band energy in detection band — build freqData Uint8Array, then use engine helper
+    const fd = new Uint8Array(magBins);
+    for (let i = 0; i < magBins; i++) {
+      const mag = Math.sqrt(re[i] * re[i] + im[i] * im[i]) / fftSize;
+      const dB = 20 * Math.log10(mag + 1e-10);
+      fd[i] = Math.max(0, Math.min(255, Math.round((dB + 100) * 255 / 70)));
+    }
+    bandESum += computeBandMeanByte(fd, sr, fftSize, C.BAND_LO, C.BAND_HI);
+
     count++;
   }
 
   if (count > 0) {
-    engine.setCalibration(rmsSum / count, flatSum / count, centSum / count);
+    engine.setCalibration(rmsSum / count, flatSum / count, centSum / count, bandESum / count);
   }
   calibrationDone = true;
 }
@@ -1580,10 +1593,10 @@ async function reprocess() {
     // Convert to Uint8Array frequency bins (0-255) like AnalyserNode
     const fd = new Uint8Array(numBins);
     for (let i = 0; i < numBins; i++) {
-      const mag = Math.sqrt(re[i] * re[i] + im[i] * im[i]);
+      const mag = Math.sqrt(re[i] * re[i] + im[i] * im[i]) / fftSize;
       const dB = 20 * Math.log10(mag + 1e-10);
-      // AnalyserNode maps roughly -100dB..0dB to 0..255
-      fd[i] = Math.max(0, Math.min(255, Math.round((dB + 100) * 255 / 100)));
+      // Match AnalyserNode default: minDecibels=-100, maxDecibels=-30 → 70dB range
+      fd[i] = Math.max(0, Math.min(255, Math.round((dB + 100) * 255 / 70)));
     }
 
     const result = engine.processFrame(td, fd, now, sr, fftSize);

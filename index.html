@@ -510,7 +510,7 @@
 </div>
 
 <script type="module">
-import { JumpEngine, S, DEFAULTS, computeRMS, computeSpectralFlatness, computeSpectralCentroid } from './engine.js';
+import { JumpEngine, S, DEFAULTS, computeRMS, computeSpectralFlatness, computeSpectralCentroid, computeBandMeanByte } from './engine.js';
 
 // ═══════════════════════════════════════════════════════════════
 //   ENGINE INSTANCE
@@ -649,7 +649,7 @@ function updateWindowViz(frame) {
 async function calibrate() {
   const DURATION = 2300;
   const start    = performance.now();
-  let rmsSum = 0, flatSum = 0, centSum = 0, samples = 0;
+  let rmsSum = 0, flatSum = 0, centSum = 0, bandESum = 0, samples = 0;
 
   await new Promise(resolve => {
     function tick() {
@@ -662,13 +662,14 @@ async function calibrate() {
       rmsSum  += computeRMS(dataArray);
       flatSum += computeSpectralFlatness(freqArray);
       centSum += computeSpectralCentroid(freqArray, audioCtx.sampleRate, analyser.fftSize);
+      bandESum += computeBandMeanByte(freqArray, audioCtx.sampleRate, analyser.fftSize, engine.cfg.BAND_LO, engine.cfg.BAND_HI);
       samples++;
       elapsed < DURATION ? requestAnimationFrame(tick) : resolve();
     }
     requestAnimationFrame(tick);
   });
 
-  engine.setCalibration(rmsSum / samples, flatSum / samples, centSum / samples);
+  engine.setCalibration(rmsSum / samples, flatSum / samples, centSum / samples, bandESum / samples);
 }
 
 // ═══════════════════════════════════════════════════════════════

@@ -27,7 +27,7 @@ const DEFAULTS = Object.freeze({
   PAUSE_MULT: 2.6,
   PAUSE_ABS: 2800,
   RESUME_GRACE: 9000,
-  REFRACTORY: 110,
+  REFRACTORY: 250,
 
   // Spectral gate
   SIG_WEIGHT_FLAT: 0.45,
@@ -40,6 +40,14 @@ const DEFAULTS = Object.freeze({
   CENT_ROPE_MAX_HZ: 10000,
   FLAT_ROPE_MIN: 0.15,
   TEMPLATE_BLEND: 0.35,
+
+  // Band-energy detection (peak-picking, dB-domain)
+  BAND_LO: 500,
+  BAND_HI: 2000,
+  BAND_THR_MULT: 3.0,
+  DU_BAND_BYTE: 160,    // avgByte threshold for DU classification (dB-domain)
+  PEAK_CONFIRM: 3,      // consecutive declining frames to confirm a peak
+  PEAK_DECAY: 0.80,     // bandByte must drop to this fraction of peak to count as declining
 
   // Visual (consumers may use these for UI)
   RIBBON_SCALE: 1.6,
@@ -108,6 +116,37 @@ export function computeSpectralCentroid(freq, sampleRate, fftSize) {
   return totalEnergy > 1e-8 ? weightedSum / totalEnergy : 0;
 }
 
+/** RMS of linear magnitudes in the [loHz, hiHz] band.
+ *  Converts byte freqData (0-255, mapped from minDb..maxDb) back to linear. */
+export function computeBandEnergy(freq, sampleRate, fftSize, loHz, hiHz, minDb, maxDb) {
+  if (minDb === undefined) minDb = -100;
+  if (maxDb === undefined) maxDb = -30;
+  const dbRange = maxDb - minDb;
+  const binWidth = sampleRate / fftSize;
+  const iLo = Math.max(1, Math.floor(loHz / binWidth));
+  const iHi = Math.min(freq.length - 1, Math.ceil(hiHz / binWidth));
+  const nBins = Math.max(1, iHi - iLo + 1);
+  let sum = 0;
+  for (let i = iLo; i <= iHi; i++) {
+    const dB = (freq[i] / 255) * dbRange + minDb;
+    const mag = Math.pow(10, dB / 20);
+    sum += mag * mag;
+  }
+  return Math.sqrt(sum / nBins);
+}
+
+/** Mean byte value (dB-domain) in the [loHz, hiHz] band.
+ *  Returns 0-255 scale — works directly with getByteFrequencyData. */
+export function computeBandMeanByte(freq, sampleRate, fftSize, loHz, hiHz) {
+  const binWidth = sampleRate / fftSize;
+  const iLo = Math.max(1, Math.floor(loHz / binWidth));
+  const iHi = Math.min(freq.length - 1, Math.ceil(hiHz / binWidth));
+  const nBins = Math.max(1, iHi - iLo + 1);
+  let sum = 0;
+  for (let i = iLo; i <= iHi; i++) sum += freq[i];
+  return sum / nBins;
+}
+
 // ═══════════════════════════════════════════════════════════════
 //   JumpEngine class
 // ═══════════════════════════════════════════════════════════════
@@ -125,8 +164,12 @@ export class JumpEngine {
     this.estimatedT = 0;
     this.lastPeakTime = 0;
     this.learnBuf = [];
-    this.peakArmed = false;
     this.savedT = 0;
+
+    // Peak tracker (replaces hysteresis)
+    this.bandPeakVal = 0;
+    this.bandPeakTime = 0;
+    this.bandFalling = 0;
 
     // Counters
     this.totalJumps = 0;
@@ -140,6 +183,7 @@ export class JumpEngine {
     this.sensitivity = 5;
     this.baselineFlatness = 0;
     this.baselineCentroid = 0;
+    this.noiseBandEnergy = 0;
 
     // Spectral template (learned from user's rope)
     this.ropeTemplate = { flatness: 0, crest: 0, centroid: 0, count: 0 };
@@ -147,10 +191,11 @@ export class JumpEngine {
 
   // ─── Public API ───
 
-  setCalibration(noiseFloor, baselineFlatness, baselineCentroid) {
+  setCalibration(noiseFloor, baselineFlatness, baselineCentroid, noiseBandEnergy) {
     this.noiseFloor = noiseFloor;
     this.baselineFlatness = baselineFlatness;
     this.baselineCentroid = baselineCentroid;
+    this.noiseBandEnergy = noiseBandEnergy || 0;
   }
 
   setSensitivity(val) {
@@ -200,21 +245,41 @@ export class JumpEngine {
     const peak = computePeak(timeData);
     const lvl = Math.min(peak * C.RIBBON_SCALE, 1);
 
-    const thr = this._baseThreshold();
+    // Band detection (dB-domain mean byte in detection band)
+    const bandByte = computeBandMeanByte(freqData, sampleRate, fftSize, C.BAND_LO, C.BAND_HI);
+    const bandThr = this._bandThreshold();
     const inWin = this._isInWindow(now);
+    const effBandThr = inWin ? bandThr * C.THR_WIN_MULT : bandThr;
+
+    // Legacy amplitude threshold (for frame info / UI)
+    const thr = this._baseThreshold();
     const effThr = inWin ? thr * C.THR_WIN_MULT : thr;
 
     // Pause watchdog
     const pauseEvt = this._checkPauseTimeout(now);
     if (pauseEvt) events.push(pauseEvt);
 
-    // Hysteresis: must fall below 52% of effThr before re-arming
-    if (lvl < effThr * 0.52) this.peakArmed = true;
+    // ── Online peak detector (dB-domain) ──
+    // Track rising band byte signal; confirm peak when signal declines
+    // or when held too long (timeout handles sustained energy like DU chains)
+    if (bandByte > this.bandPeakVal) {
+      this.bandPeakVal = bandByte;
+      this.bandPeakTime = now;
+      this.bandFalling = 0;
+    } else if (bandByte < this.bandPeakVal * C.PEAK_DECAY) {
+      this.bandFalling++;
+    } else {
+      this.bandFalling = 0;
+    }
 
-    if (this.peakArmed && lvl >= effThr) {
-      const gap = now - this.lastPeakTime;
+    const peakAge = now - this.bandPeakTime;
+    const peakConfirmed = this.bandFalling >= C.PEAK_CONFIRM
+      || (peakAge > C.REFRACTORY * 1.5 && this.bandPeakVal >= effBandThr);
+
+    if (peakConfirmed && this.bandPeakVal >= effBandThr) {
+      const gap = this.bandPeakTime - this.lastPeakTime;
       if (gap >= C.REFRACTORY) {
-        // Spectral gate
+        // Spectral gate (secondary filter)
         const flatness = computeSpectralFlatness(freqData);
         const crest = computeCrestFactor(timeData);
         const centroid = computeSpectralCentroid(freqData, sampleRate, fftSize);
@@ -224,18 +289,17 @@ export class JumpEngine {
         const passesGate = !gateActive || sigScore >= C.SIG_MIN_SCORE;
 
         if (passesGate) {
-          this.peakArmed = false;
-          // Update rope template during learning and early tracking
           if (this.state === S.LEARNING || (this.state === S.TRACKING && this.ropeTemplate.count < 20)) {
             this._updateRopeTemplate(flatness, crest, centroid);
           }
-          const peakEvents = this._onPeak(now);
-          // Annotate sigScore on each event
+          const isDU = this.bandPeakVal >= C.DU_BAND_BYTE;
+          const peakEvents = this._onPeak(this.bandPeakTime, isDU);
           for (const e of peakEvents) {
             e.sigScore = sigScore;
             e.flatness = flatness;
             e.crest = crest;
             e.centroid = centroid;
+            e.bandByte = this.bandPeakVal;
           }
           events.push(...peakEvents);
         } else {
@@ -245,9 +309,14 @@ export class JumpEngine {
             flatness,
             crest,
             centroid,
+            bandByte: this.bandPeakVal,
           });
         }
       }
+      // Reset tracker after processing
+      this.bandPeakVal = bandByte;
+      this.bandPeakTime = now;
+      this.bandFalling = 0;
     }
 
     // Attach frame info for UI consumers
@@ -256,6 +325,8 @@ export class JumpEngine {
       lvl,
       thr,
       effThr,
+      bandByte,
+      bandThr: effBandThr,
       inWindow: inWin,
       windowProgress: this._windowProgress(now),
     };
@@ -269,6 +340,13 @@ export class JumpEngine {
     const base = this.noiseFloor || 0.012;
     const mult = 1 + (10 - this.sensitivity) * 0.58;
     return Math.max(base * mult * 2.6, 0.016);
+  }
+
+  _bandThreshold() {
+    const C = this.cfg;
+    const base = this.noiseBandEnergy || 20;
+    const mult = 1 + (10 - this.sensitivity) * 0.3;
+    return Math.max(base * mult * C.BAND_THR_MULT, 40);
   }
 
   // ─── Internal: prediction window ───
@@ -362,7 +440,7 @@ export class JumpEngine {
 
   // ─── Internal: peak handler ───
 
-  _onPeak(now) {
+  _onPeak(now, isDU) {
     const C = this.cfg;
     const gap = now - this.lastPeakTime;
     const events = [];
@@ -381,8 +459,8 @@ export class JumpEngine {
         break;
 
       case S.TRACKING:
-        if (gap < this.estimatedT * C.DU_RATIO && gap >= C.REFRACTORY) {
-          // Double under
+        // DU classification: energy-based only (band byte peak level)
+        if (isDU) {
           this.duJumps++;
           this.lastPeakTime = now;
           events.push({ type: 'du' });
